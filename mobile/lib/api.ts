@@ -8,10 +8,10 @@ function normalizeApiBaseUrl(rawUrl: string): string {
 
 function getDefaultApiBaseUrl(): string {
   if (Platform.OS === "android") {
-    return "http://10.128.153.101:3001/api";
+    return "http://10.191.110.101:3001/api";
   }
 
-  return "http://10.128.153.101:3001/api";
+  return "http://10.191.110.101:3001/api";
 }
 
 const configuredBackendUrl =

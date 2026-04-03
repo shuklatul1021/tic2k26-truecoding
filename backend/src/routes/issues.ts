@@ -50,6 +50,8 @@ async function loadIssueDetail(issueId: number, currentUserId?: number | null) {
        i.worker_bonus_points AS "workerBonusPoints",
        i.confidence_score AS "confidenceScore",
        i.user_id AS "userId",
+       i.created_at AS "createdAt",
+       i.updated_at AS "updatedAt",
        reporter.name AS "userName",
        worker.name AS "assignedWorkerName",
        COUNT(uv.id)::int AS upvotes,

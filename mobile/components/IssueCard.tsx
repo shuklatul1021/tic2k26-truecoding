@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, Image, StyleSheet, Pressable, Platform } from "react-native";
+import { View, Text, Image, StyleSheet, Pressable } from "react-native";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import type { Issue } from "@/lib/api";
