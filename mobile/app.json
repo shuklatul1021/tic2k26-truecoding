@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "civic_Samadhan",
+    "slug": "civic_Samadhan",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "scheme": "civicsamadhan",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
