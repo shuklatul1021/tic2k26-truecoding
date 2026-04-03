@@ -1,141 +1,76 @@
-import type { IssueCategory, IssuePriority, IssueStatus } from "@/lib/api";
-
-const categoryLabels: Record<IssueCategory, string> = {
-  garbage: "Garbage",
-  pothole: "Pothole",
-  water_leakage: "Water Leakage",
-  other: "Other",
-};
-
-const priorityLabels: Record<IssuePriority, string> = {
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-};
-
-const statusLabels: Record<IssueStatus, string> = {
-  pending: "Pending",
-  in_progress: "In Progress",
-  resolved: "Resolved",
-};
-
-function parseDate(value: string | null | undefined) {
-  if (!value) {
+function parseValidDate(dateStr?: string | null): Date | null {
+  if (!dateStr) {
     return null;
   }
 
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  const date = new Date(dateStr);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export function formatDate(value: string | null | undefined) {
-  const parsed = parseDate(value);
-  if (!parsed) {
-    return "Unknown date";
-  }
+export function formatDistanceToNow(dateStr: string): string {
+  const date = parseValidDate(dateStr);
+  if (!date) return "recently";
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+  const diffWeeks = Math.floor(diffDays / 7);
+  const diffMonths = Math.floor(diffDays / 30);
 
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "2-digit",
+  if (diffSecs < 60) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffWeeks < 4) return `${diffWeeks}w ago`;
+  if (diffMonths < 12) return `${diffMonths}mo ago`;
+  return date.toLocaleDateString();
+}
+
+export function formatDate(dateStr: string): string {
+  const date = parseValidDate(dateStr);
+  if (!date) return "Date unavailable";
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+export function formatTime(dateStr: string): string {
+  const date = parseValidDate(dateStr);
+  if (!date) return "Time unavailable";
+  return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+}
+
+export function formatDateTime(dateStr?: string | null): string {
+  const date = parseValidDate(dateStr);
+  if (!date) return "Not set";
+  return date.toLocaleString("en-US", {
     month: "short",
+    day: "numeric",
     year: "numeric",
-  }).format(parsed);
-}
-
-export function formatTime(value: string | null | undefined) {
-  const parsed = parseDate(value);
-  if (!parsed) {
-    return "--:--";
-  }
-
-  return new Intl.DateTimeFormat("en-IN", {
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
-  }).format(parsed);
+  });
 }
 
-export function formatDateTime(value: string | null | undefined) {
-  const parsed = parseDate(value);
-  if (!parsed) {
-    return "Not scheduled";
-  }
-
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(parsed);
+export function formatDateTimeInput(dateStr?: string | null): string {
+  const date = parseValidDate(dateStr);
+  if (!date) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
 }
 
-export function formatDateTimeInput(value: string | null | undefined) {
-  const parsed = parseDate(value);
-  if (!parsed) {
-    return "";
-  }
-
-  const year = parsed.getFullYear();
-  const month = String(parsed.getMonth() + 1).padStart(2, "0");
-  const day = String(parsed.getDate()).padStart(2, "0");
-  const hours = String(parsed.getHours()).padStart(2, "0");
-  const minutes = String(parsed.getMinutes()).padStart(2, "0");
-
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
+export function capitalize(str: string): string {
+  return str.charAt(0).toUpperCase() + str.slice(1).replace(/_/g, " ");
 }
 
-export function formatDistanceToNow(value: string | null | undefined) {
-  const parsed = parseDate(value);
-  if (!parsed) {
-    return "just now";
-  }
-
-  const diffMs = parsed.getTime() - Date.now();
-  const diffMinutes = Math.round(diffMs / 60000);
-  const absMinutes = Math.abs(diffMinutes);
-  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
-
-  if (absMinutes < 1) {
-    return "just now";
-  }
-
-  if (absMinutes < 60) {
-    return rtf.format(diffMinutes, "minute");
-  }
-
-  const diffHours = Math.round(diffMinutes / 60);
-  const absHours = Math.abs(diffHours);
-  if (absHours < 24) {
-    return rtf.format(diffHours, "hour");
-  }
-
-  const diffDays = Math.round(diffHours / 24);
-  const absDays = Math.abs(diffDays);
-  if (absDays < 7) {
-    return rtf.format(diffDays, "day");
-  }
-
-  const diffWeeks = Math.round(diffDays / 7);
-  if (Math.abs(diffWeeks) < 5) {
-    return rtf.format(diffWeeks, "week");
-  }
-
-  const diffMonths = Math.round(diffDays / 30);
-  if (Math.abs(diffMonths) < 12) {
-    return rtf.format(diffMonths, "month");
-  }
-
-  const diffYears = Math.round(diffDays / 365);
-  return rtf.format(diffYears, "year");
+export function getPriorityLabel(priority: string): string {
+  return { high: "High Priority", medium: "Medium Priority", low: "Low Priority" }[priority] || priority;
 }
 
-export function getCategoryLabel(category: IssueCategory) {
-  return categoryLabels[category];
+export function getCategoryLabel(cat: string): string {
+  return { garbage: "Garbage", pothole: "Pothole", water_leakage: "Water Leakage", other: "Other" }[cat] || cat;
 }
 
-export function getPriorityLabel(priority: IssuePriority) {
-  return priorityLabels[priority];
-}
-
-export function getStatusLabel(status: IssueStatus) {
-  return statusLabels[status];
+export function getStatusLabel(status: string): string {
+  return { pending: "Pending", in_progress: "In Progress", resolved: "Resolved" }[status] || status;
 }
