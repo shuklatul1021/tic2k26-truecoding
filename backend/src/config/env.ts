@@ -27,6 +27,8 @@ export const env = {
   adminName: process.env.ADMIN_NAME?.trim() || "Civic Samadhan Admin",
   adminEmail: process.env.ADMIN_EMAIL?.trim() || "",
   adminPassword: process.env.ADMIN_PASSWORD?.trim() || "",
+  /** OAuth 2.0 Web client ID used to verify Google ID tokens */
+  googleClientId: process.env.GOOGLE_CLIENT_ID?.trim() || "",
 } as const;
 
 if (!Number.isFinite(env.port) || env.port <= 0) {

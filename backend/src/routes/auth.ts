@@ -1,7 +1,10 @@
+import { randomBytes } from "node:crypto";
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
 import { getUserStats } from "../db/queries.js";
+import { env } from "../config/env.js";
+import { verifyGoogleIdToken } from "../lib/google.js";
 import { signToken } from "../lib/jwt.js";
 import { requireAuth } from "../middleware/auth.js";
 import type { AuthenticatedRequest } from "../types/auth.js";
@@ -257,6 +260,122 @@ router.post("/worker-register", async (req, res) => {
     res.status(status).json({
       error: status === 409 ? "Conflict" : "InternalError",
       message,
+    });
+  }
+});
+
+router.post("/google", async (req, res) => {
+  try {
+    if (!env.googleClientId) {
+      res.status(503).json({
+        error: "NotConfigured",
+        message: "Google sign-in is not configured. Set GOOGLE_CLIENT_ID on the server.",
+      });
+      return;
+    }
+
+    const { idToken } = req.body as { idToken?: string };
+    if (!idToken?.trim()) {
+      res.status(400).json({ error: "BadRequest", message: "idToken is required" });
+      return;
+    }
+
+    const profile = await verifyGoogleIdToken(idToken.trim());
+
+    const existing = await pool.query(
+      `SELECT
+         id,
+         name,
+         email,
+         role,
+         points_balance AS "pointsBalance",
+         wallet_balance AS "walletBalance",
+         created_at AS "createdAt"
+       FROM users
+       WHERE email = $1
+       LIMIT 1`,
+      [profile.email],
+    );
+
+    let user = existing.rows[0] as
+      | {
+          id: number;
+          name: string;
+          email: string;
+          role: "user" | "admin" | "worker";
+          pointsBalance: number;
+          walletBalance: number;
+          createdAt: string;
+        }
+      | undefined;
+
+    if (!user) {
+      const passwordHash = await bcrypt.hash(randomBytes(32).toString("base64url"), 10);
+      const inserted = await pool.query(
+        `INSERT INTO users (name, email, password_hash, role)
+         VALUES ($1, $2, $3, 'user')
+         RETURNING
+           id,
+           name,
+           email,
+           role,
+           points_balance AS "pointsBalance",
+           wallet_balance AS "walletBalance",
+           created_at AS "createdAt"`,
+        [profile.name, profile.email, passwordHash],
+      );
+      user = inserted.rows[0] as typeof user;
+    }
+
+    const stats = await getUserStats(user!.id);
+    let onboardingCompleted = false;
+    if (user!.role === "worker") {
+      const workerProfile = await pool.query(
+        `SELECT onboarding_completed AS "onboardingCompleted"
+         FROM worker_profiles
+         WHERE user_id = $1
+         LIMIT 1`,
+        [user!.id],
+      );
+      onboardingCompleted = workerProfile.rows[0]?.onboardingCompleted ?? false;
+    }
+
+    const token = signToken({
+      userId: user!.id,
+      email: user!.email,
+      role: user!.role,
+    });
+
+    res.json({
+      token,
+      user: {
+        id: user!.id,
+        name: user!.name,
+        email: user!.email,
+        role: user!.role,
+        pointsBalance: user!.pointsBalance,
+        walletBalance: user!.walletBalance,
+        createdAt: user!.createdAt,
+        onboardingCompleted,
+        issuesReported: stats.issuesReported,
+        issuesResolved: stats.issuesResolved,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Google sign-in failed";
+    const isTokenError =
+      message.includes("Invalid Google token") ||
+      message.includes("not verified") ||
+      message.includes("Wrong number of segments") ||
+      message.includes("Token used too late");
+
+    if (!isTokenError) {
+      logger.error({ error }, "Google auth error");
+    }
+
+    res.status(isTokenError ? 401 : 500).json({
+      error: isTokenError ? "Unauthorized" : "InternalError",
+      message: isTokenError ? "Google sign-in could not be verified" : message,
     });
   }
 });
