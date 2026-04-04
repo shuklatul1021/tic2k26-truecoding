@@ -50,7 +50,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       typeof data === "string"
         ? data
         : data?.message || data?.error || `Request failed (${response.status})`;
-    throw new Error(errorMessage);
+    const error = new Error(errorMessage) as Error & { data?: unknown; status?: number };
+    error.data = typeof data === "string" ? undefined : data;
+    error.status = response.status;
+    throw error;
   }
 
   return data as T;
@@ -100,17 +103,44 @@ export interface WorkerReport {
   createdAt: string;
 }
 
+export type IssueCategory = "garbage" | "pothole" | "water_leakage" | "other";
+export type IssuePriority = "high" | "medium" | "low";
+export type IssueStatus = "pending" | "in_progress" | "resolved";
+export type ImageSource = "camera" | "gallery";
+
+export interface VerificationDetails {
+  accepted: boolean;
+  verificationStatus: "verified" | "rejected";
+  verificationSummary: string;
+  authenticityScore: number;
+  confidenceScore: number;
+  authenticityConfidence: number;
+  authenticityExplanation: string;
+  confidence: number;
+  coveragePercentage: number;
+  densityScore: number;
+  detected: boolean;
+  explanation: string;
+  isRealImage: boolean;
+  imageSubject: string;
+  category: IssueCategory;
+  priority: IssuePriority;
+  aiDescription: string;
+  locationVerified: boolean;
+}
+
 export interface Issue {
   id: number;
   title: string;
   description: string;
-  category: "garbage" | "pothole" | "water_leakage" | "other";
-  priority: "high" | "medium" | "low";
-  status: "pending" | "in_progress" | "resolved";
+  category: IssueCategory;
+  priority: IssuePriority;
+  status: IssueStatus;
   imageUrl: string;
   resolvedImageUrl?: string | null;
   latitude: number;
   longitude: number;
+  distanceKm?: number | null;
   address?: string | null;
   upvotes: number;
   hasUpvoted: boolean;
@@ -125,8 +155,16 @@ export interface Issue {
   verificationStatus?: "pending" | "verified" | "rejected";
   verificationSummary?: string | null;
   authenticityScore?: number | null;
+  authenticityConfidence?: number | null;
+  authenticityExplanation?: string | null;
+  coveragePercentage?: number | null;
+  densityScore?: number | null;
+  detected?: boolean | null;
+  explanation?: string | null;
+  isRealImage?: boolean | null;
+  imageSubject?: string | null;
   locationVerified?: boolean;
-  imageSource?: "camera" | "gallery";
+  imageSource?: ImageSource;
   capturedLatitude?: number | null;
   capturedLongitude?: number | null;
   rewardPoints?: number;
@@ -199,12 +237,23 @@ export const authApi = {
 };
 
 export const issuesApi = {
-  getAll: (params?: { status?: string; priority?: string; category?: string; page?: number }) => {
+  getAll: (params?: {
+    status?: string;
+    priority?: string;
+    category?: string;
+    page?: number;
+    latitude?: number;
+    longitude?: number;
+    radiusKm?: number;
+  }) => {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
     if (params?.priority) qs.set("priority", params.priority);
     if (params?.category) qs.set("category", params.category);
     if (params?.page) qs.set("page", String(params.page));
+    if (typeof params?.latitude === "number") qs.set("latitude", String(params.latitude));
+    if (typeof params?.longitude === "number") qs.set("longitude", String(params.longitude));
+    if (typeof params?.radiusKm === "number") qs.set("radiusKm", String(params.radiusKm));
     const query = qs.toString();
     return api.get<IssuesResponse>(`/issues${query ? `?${query}` : ""}`);
   },
@@ -219,17 +268,12 @@ export const issuesApi = {
     latitude: number;
     longitude: number;
     address?: string;
-    imageSource: "camera" | "gallery";
+    imageSource: ImageSource;
     captureLatitude?: number;
     captureLongitude?: number;
   }) => api.post<IssueDetail>("/issues", data),
-  verifyImage: (data: { imageUrl: string; imageSource: "camera" | "gallery" }) =>
-    api.post<{
-      accepted: boolean;
-      verificationSummary: string;
-      authenticityScore: number;
-      confidenceScore: number;
-    }>("/issues/verify-image", data),
+  verifyImage: (data: { imageUrl: string; imageSource: ImageSource }) =>
+    api.post<VerificationDetails>("/issues/verify-image", data),
   update: (
     id: number,
     data: {
@@ -277,7 +321,7 @@ export const uploadApi = {
 
 export const classifyApi = {
   classify: (imageUrl: string) =>
-    api.post<{ category: string; priority: string; confidence: number; description: string }>(
+    api.post<{ category: IssueCategory; priority: IssuePriority; confidence: number; description: string }>(
       "/classify",
       { imageUrl },
     ),

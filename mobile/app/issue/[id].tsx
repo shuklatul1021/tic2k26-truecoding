@@ -163,11 +163,34 @@ export default function IssueDetailScreen() {
         )}
 
         {issue.verificationSummary && (
-          <View style={styles.verificationCard}>
+          <View
+            style={[
+              styles.verificationCard,
+              issue.verificationStatus === "rejected" ? styles.verificationCardRejected : styles.verificationCardVerified,
+            ]}
+          >
             <Text style={styles.verificationTitle}>Verification</Text>
             <Text style={styles.verificationText}>{issue.verificationSummary}</Text>
             <Text style={styles.verificationText}>
-              Authenticity: {Math.round((issue.authenticityScore ?? 0) * 100)}% | Location: {issue.locationVerified ? "matched" : "not matched"}
+              Real image: {issue.isRealImage ? "Yes" : "No"} | Detected: {issue.detected ? "Yes" : "No"}
+            </Text>
+            <Text style={styles.verificationText}>
+              Authenticity: {Math.round((issue.authenticityConfidence ?? issue.authenticityScore ?? 0) * 100)}% | Confidence: {Math.round((issue.confidenceScore ?? 0) * 100)}%
+            </Text>
+            <Text style={styles.verificationText}>
+              Coverage: {Math.round(issue.coveragePercentage ?? 0)}% | Density: {Number(issue.densityScore ?? 0).toFixed(2)}
+            </Text>
+            <Text style={styles.verificationText}>
+              Image shows: {issue.imageSubject || "Unknown"}
+            </Text>
+            <Text style={styles.verificationText}>
+              Authenticity note: {issue.authenticityExplanation || "No authenticity note"}
+            </Text>
+            <Text style={styles.verificationText}>
+              Explanation: {issue.explanation || issue.verificationSummary}
+            </Text>
+            <Text style={styles.verificationText}>
+              Location: {issue.locationVerified ? "matched" : "not matched"}
             </Text>
           </View>
         )}
@@ -309,7 +332,9 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.secondaryLight,
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, alignSelf: "flex-start", marginTop: 8,
   },
-  verificationCard: { backgroundColor: Colors.primaryLight, borderRadius: 16, padding: 14, marginTop: 14, gap: 4 },
+  verificationCard: { borderRadius: 16, padding: 14, marginTop: 14, gap: 4, borderWidth: 1 },
+  verificationCardVerified: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
+  verificationCardRejected: { backgroundColor: Colors.dangerLight, borderColor: Colors.danger },
   verificationTitle: { fontSize: 14, fontWeight: "700" as const, color: Colors.primary },
   verificationText: { fontSize: 13, color: Colors.textSecondary, lineHeight: 18 },
   rewardCard: { backgroundColor: Colors.warningLight, borderRadius: 16, padding: 14, marginTop: 14, gap: 4 },
