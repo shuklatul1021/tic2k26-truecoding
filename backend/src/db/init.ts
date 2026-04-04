@@ -68,6 +68,14 @@ CREATE TABLE IF NOT EXISTS issues (
   verification_status TEXT NOT NULL DEFAULT 'verified',
   verification_summary TEXT,
   authenticity_score DOUBLE PRECISION,
+  authenticity_confidence DOUBLE PRECISION,
+  authenticity_explanation TEXT,
+  coverage_percentage DOUBLE PRECISION,
+  density_score DOUBLE PRECISION,
+  detected BOOLEAN,
+  explanation TEXT,
+  is_real_image BOOLEAN,
+  image_subject TEXT,
   location_verified BOOLEAN NOT NULL DEFAULT FALSE,
   image_source TEXT NOT NULL DEFAULT 'gallery',
   captured_latitude DOUBLE PRECISION,
@@ -87,6 +95,14 @@ ALTER TABLE issues ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'verified';
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS verification_summary TEXT;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS authenticity_score DOUBLE PRECISION;
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS authenticity_confidence DOUBLE PRECISION;
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS authenticity_explanation TEXT;
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS coverage_percentage DOUBLE PRECISION;
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS density_score DOUBLE PRECISION;
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS detected BOOLEAN;
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS explanation TEXT;
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS is_real_image BOOLEAN;
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS image_subject TEXT;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS location_verified BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS image_source TEXT NOT NULL DEFAULT 'gallery';
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS captured_latitude DOUBLE PRECISION;

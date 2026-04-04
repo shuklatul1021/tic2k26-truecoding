@@ -41,6 +41,14 @@ async function loadIssueDetail(issueId: number, currentUserId?: number | null) {
        i.verification_status AS "verificationStatus",
        i.verification_summary AS "verificationSummary",
        i.authenticity_score AS "authenticityScore",
+       i.authenticity_confidence AS "authenticityConfidence",
+       i.authenticity_explanation AS "authenticityExplanation",
+       i.coverage_percentage AS "coveragePercentage",
+       i.density_score AS "densityScore",
+       i.detected AS "detected",
+       i.explanation AS "explanation",
+       i.is_real_image AS "isRealImage",
+       i.image_subject AS "imageSubject",
        i.location_verified AS "locationVerified",
        i.image_source AS "imageSource",
        i.captured_latitude AS "capturedLatitude",
@@ -145,13 +153,31 @@ router.get("/map", async (_req: AuthenticatedRequest, res) => {
 
 router.get("/", async (req: AuthenticatedRequest, res) => {
   try {
-    const { status, priority, category, page = "1", limit = "20" } = req.query as Record<
+    const { status, priority, category, page = "1", limit = "20", latitude, longitude, radiusKm } = req.query as Record<
       string,
       string | undefined
     >;
 
     const pageNum = Math.max(1, Number.parseInt(page || "1", 10) || 1);
     const limitNum = Math.min(50, Math.max(1, Number.parseInt(limit || "20", 10) || 20));
+    const latitudeNum = latitude ? Number(latitude) : null;
+    const longitudeNum = longitude ? Number(longitude) : null;
+    const radiusKmNum = radiusKm ? Number(radiusKm) : 25;
+
+    if ((latitude && !longitude) || (!latitude && longitude)) {
+      res.status(400).json({ error: "BadRequest", message: "latitude and longitude must be provided together" });
+      return;
+    }
+
+    if (latitude && longitude && (!Number.isFinite(latitudeNum) || !Number.isFinite(longitudeNum))) {
+      res.status(400).json({ error: "BadRequest", message: "latitude and longitude must be valid numbers" });
+      return;
+    }
+
+    if (!Number.isFinite(radiusKmNum) || radiusKmNum <= 0) {
+      res.status(400).json({ error: "BadRequest", message: "radiusKm must be a valid positive number" });
+      return;
+    }
 
     if (status && !isIssueStatus(status)) {
       res.status(400).json({ error: "BadRequest", message: "Invalid status filter" });
@@ -170,6 +196,7 @@ router.get("/", async (req: AuthenticatedRequest, res) => {
 
     const values: Array<string | number | null> = ["verified"];
     const conditions: string[] = [`i.verification_status = $${values.length}`];
+    let distanceSql: string | null = null;
 
     if (status) {
       values.push(status);
@@ -182,6 +209,23 @@ router.get("/", async (req: AuthenticatedRequest, res) => {
     if (category) {
       values.push(category);
       conditions.push(`i.category = $${values.length}`);
+    }
+
+    if (latitude && longitude) {
+      values.push(latitudeNum);
+      const latitudeParam = values.length;
+      values.push(longitudeNum);
+      const longitudeParam = values.length;
+      values.push(radiusKmNum);
+      const radiusParam = values.length;
+
+      distanceSql = `6371 * 2 * ASIN(SQRT(
+        POWER(SIN(RADIANS(i.latitude - $${latitudeParam}) / 2), 2) +
+        COS(RADIANS($${latitudeParam})) * COS(RADIANS(i.latitude)) *
+        POWER(SIN(RADIANS(i.longitude - $${longitudeParam}) / 2), 2)
+      ))`;
+
+      conditions.push(`${distanceSql} <= $${radiusParam}`);
     }
 
     const whereSql = `WHERE ${conditions.join(" AND ")}`;
@@ -218,11 +262,20 @@ router.get("/", async (req: AuthenticatedRequest, res) => {
          i.verification_status AS "verificationStatus",
          i.verification_summary AS "verificationSummary",
          i.authenticity_score AS "authenticityScore",
+         i.authenticity_confidence AS "authenticityConfidence",
+         i.authenticity_explanation AS "authenticityExplanation",
+         i.coverage_percentage AS "coveragePercentage",
+         i.density_score AS "densityScore",
+         i.detected AS "detected",
+         i.explanation AS "explanation",
+         i.is_real_image AS "isRealImage",
+         i.image_subject AS "imageSubject",
          i.location_verified AS "locationVerified",
          i.reward_points AS "rewardPoints",
          i.worker_points AS "workerPoints",
          i.worker_bonus_points AS "workerBonusPoints",
          i.confidence_score AS "confidenceScore",
+         ${distanceSql ? `${distanceSql} AS "distanceKm",` : `NULL::double precision AS "distanceKm",`}
          i.user_id AS "userId",
          reporter.name AS "userName",
          COUNT(uv.id)::int AS upvotes,
@@ -240,7 +293,7 @@ router.get("/", async (req: AuthenticatedRequest, res) => {
        LEFT JOIN upvotes uv ON uv.issue_id = i.id
        ${whereSql}
        GROUP BY i.id, reporter.name, worker.name
-       ORDER BY i.created_at DESC
+       ORDER BY ${distanceSql ? `"distanceKm" ASC,` : ""} i.created_at DESC
        LIMIT $${limitParam}
        OFFSET $${offsetParam}`,
       values,
@@ -275,6 +328,22 @@ router.post("/verify-image", requireAuth, async (req: AuthenticatedRequest, res)
       imageUrl: imageUrl.trim(),
       imageSource,
     });
+
+    logger.info(
+      {
+        imageUrl: imageUrl.trim(),
+        imageSource,
+        verification,
+      },
+      "Verify image route result",
+    );
+    console.log(
+      `[VerifyImageRoute] ${JSON.stringify({
+        imageUrl: imageUrl.trim(),
+        imageSource,
+        verification,
+      })}`,
+    );
 
     if (!verification.accepted) {
       res.status(422).json({
@@ -368,11 +437,19 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res) => {
          verification_status,
          verification_summary,
          authenticity_score,
+         authenticity_confidence,
+         authenticity_explanation,
+         coverage_percentage,
+         density_score,
+         detected,
+         explanation,
+         is_real_image,
+         image_subject,
          location_verified,
          image_source,
          captured_latitude,
          captured_longitude
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'verified', $11, $12, $13, $14, $15, $16)
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'verified', $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
        RETURNING id`,
       [
         title.trim(),
@@ -387,6 +464,14 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res) => {
         req.user!.userId,
         verification.verificationSummary,
         verification.authenticityScore,
+        verification.authenticityConfidence,
+        verification.authenticityExplanation,
+        verification.coveragePercentage,
+        verification.densityScore,
+        verification.detected,
+        verification.explanation,
+        verification.isRealImage,
+        verification.imageSubject,
         verification.locationVerified,
         imageSource,
         typeof captureLatitude === "number" ? captureLatitude : null,

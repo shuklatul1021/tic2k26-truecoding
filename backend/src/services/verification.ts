@@ -2,6 +2,9 @@ import fs from "fs";
 import path from "path";
 import { GoogleGenAI } from "@google/genai";
 import { env } from "../config/env.js";
+import { logger } from "../lib/logger.js";
+
+const FORCE_MOCK_IMAGE_VERIFICATION = false;
 
 export interface VerificationInput {
   imageUrl: string;
@@ -18,6 +21,15 @@ export interface VerificationResult {
   verificationSummary: string;
   authenticityScore: number;
   confidenceScore: number;
+  authenticityConfidence: number;
+  authenticityExplanation: string;
+  confidence: number;
+  coveragePercentage: number;
+  densityScore: number;
+  detected: boolean;
+  explanation: string;
+  isRealImage: boolean;
+  imageSubject: string;
   category: "garbage" | "pothole" | "water_leakage" | "other";
   priority: "high" | "medium" | "low";
   aiDescription: string;
@@ -25,18 +37,128 @@ export interface VerificationResult {
 }
 
 interface GeminiIssueAssessment {
-  isAuthentic: boolean;
-  isPublicCivicIssue: boolean;
+  isRealImage: boolean;
+  imageSubject: string;
+  detected: boolean;
+  authenticityConfidence: number;
+  authenticityExplanation: string;
+  confidence: number;
+  coveragePercentage: number;
+  densityScore: number;
+  explanation: string;
   containsScreenOrDevice: boolean;
-  authenticityScore: number;
-  civicRelevanceScore: number;
   category: VerificationResult["category"];
   priority: VerificationResult["priority"];
-  confidenceScore: number;
   summary: string;
 }
 
 let cachedClient: GoogleGenAI | null = null;
+
+export interface ImageClassificationResult {
+  category: VerificationResult["category"];
+  priority: VerificationResult["priority"];
+  confidence: number;
+  description: string;
+}
+
+const ANALYSIS_CACHE_TTL_MS = 5 * 60 * 1000;
+const geminiAnalysisCache = new Map<string, { assessment: GeminiIssueAssessment; expiresAt: number }>();
+
+function emitGeminiDebug(level: "info" | "warn" | "error", message: string, payload: Record<string, unknown>) {
+  logger[level](payload, message);
+
+  const formatted = `[GeminiDebug] ${message} ${JSON.stringify(payload)}`;
+  if (level === "error") {
+    console.error(formatted);
+    return;
+  }
+
+  if (level === "warn") {
+    console.warn(formatted);
+    return;
+  }
+
+  console.log(formatted);
+}
+
+function extractGeminiResponseMeta(response: unknown) {
+  const value = response as {
+    usageMetadata?: unknown;
+    candidates?: unknown;
+    promptFeedback?: unknown;
+    responseId?: unknown;
+    modelVersion?: unknown;
+    createTime?: unknown;
+  };
+
+  return {
+    responseId: value?.responseId ?? null,
+    modelVersion: value?.modelVersion ?? null,
+    createTime: value?.createTime ?? null,
+    usageMetadata: value?.usageMetadata ?? null,
+    promptFeedback: value?.promptFeedback ?? null,
+    candidates: Array.isArray(value?.candidates)
+      ? value.candidates.map((candidate) => {
+          const item = candidate as {
+            finishReason?: unknown;
+            avgLogprobs?: unknown;
+            index?: unknown;
+            safetyRatings?: unknown;
+            content?: unknown;
+            tokenCount?: unknown;
+          };
+
+          return {
+            index: item?.index ?? null,
+            finishReason: item?.finishReason ?? null,
+            avgLogprobs: item?.avgLogprobs ?? null,
+            tokenCount: item?.tokenCount ?? null,
+            safetyRatings: item?.safetyRatings ?? null,
+            content: item?.content ?? null,
+          };
+        })
+      : null,
+  };
+}
+
+function getMockVerificationResult(): GeminiIssueAssessment {
+  return {
+    isRealImage: true,
+    imageSubject: "roadside garbage pile",
+    detected: true,
+    authenticityConfidence: 0.99,
+    authenticityExplanation: "Mock verification enabled. Image treated as a real camera image.",
+    confidence: 0.99,
+    coveragePercentage: 72,
+    densityScore: 0.86,
+    explanation: "Mock verification enabled. Garbage issue detected.",
+    containsScreenOrDevice: false,
+    category: "garbage",
+    priority: "medium",
+    summary: "Mock verification enabled. Image accepted without Gemini.",
+  };
+}
+
+function getCachedAssessment(imageUrl: string) {
+  const cached = geminiAnalysisCache.get(imageUrl);
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.expiresAt < Date.now()) {
+    geminiAnalysisCache.delete(imageUrl);
+    return null;
+  }
+
+  return cached.assessment;
+}
+
+function setCachedAssessment(imageUrl: string, assessment: GeminiIssueAssessment) {
+  geminiAnalysisCache.set(imageUrl, {
+    assessment,
+    expiresAt: Date.now() + ANALYSIS_CACHE_TTL_MS,
+  });
+}
 
 function getGeminiClient() {
   if (!env.geminiApiKey) {
@@ -89,24 +211,52 @@ function getLocalImageData(imageUrl: string) {
 }
 
 async function analyzeWithGemini(imageUrl: string) {
+  const cachedAssessment = getCachedAssessment(imageUrl);
+  if (cachedAssessment) {
+    emitGeminiDebug("info", "Using cached Gemini image analysis", {
+      imageUrl,
+      cachedAssessment,
+    });
+    return cachedAssessment;
+  }
+
+  if (FORCE_MOCK_IMAGE_VERIFICATION) {
+    const mockResult = getMockVerificationResult();
+    emitGeminiDebug("warn", "Gemini mock mode enabled", {
+      imageUrl,
+      mockResult,
+    });
+    setCachedAssessment(imageUrl, mockResult);
+    return mockResult;
+  }
+
   const client = getGeminiClient();
   const imageData = getLocalImageData(imageUrl);
 
   if (!client || !imageData) {
+    emitGeminiDebug("warn", "Skipping Gemini image analysis", {
+      imageUrl,
+      hasGeminiClient: Boolean(client),
+      hasImageData: Boolean(imageData),
+    });
     return null;
   }
 
   const prompt = `
 Return strict JSON with these keys:
 {
-  "isAuthentic": boolean,
-  "isPublicCivicIssue": boolean,
+  "isRealImage": boolean,
+  "imageSubject": string,
+  "detected": boolean,
+  "authenticityConfidence": number,
+  "authenticityExplanation": string,
+  "confidence": number,
+  "coveragePercentage": number,
+  "densityScore": number,
+  "explanation": string,
   "containsScreenOrDevice": boolean,
-  "authenticityScore": number,
-  "civicRelevanceScore": number,
   "category": "garbage" | "pothole" | "water_leakage" | "other",
   "priority": "high" | "medium" | "low",
-  "confidenceScore": number,
   "summary": string
 }
 
@@ -115,12 +265,13 @@ Determine whether this image is:
 2. clearly showing a genuine public civic issue
 
 Reject screenshots, laptop or phone screens, televisions, documents, selfies, indoor personal objects, pets, and unrelated scenes.
-Only mark isPublicCivicIssue true when the image clearly shows a real civic problem such as garbage, potholes, road damage, drains, leakage, or damaged public infrastructure.
+Treat visible roadside trash, litter, garbage bags, waste piles, overflowing bins, dumped debris, drains, potholes, leakage, and damaged public infrastructure as real civic issues when they are clearly visible in the scene.
+If the photo is a real outdoor garbage image, mark category as "garbage" even when the garbage pile is small or spread out.
 Also classify the civic issue category and priority.
 `;
 
   const response = await client.models.generateContent({
-    model: "gemini-2.0-flash-001",
+    model: "gemini-3-flash-preview",
     contents: [
       {
         role: "user",
@@ -138,22 +289,95 @@ Also classify the civic issue category and priority.
   });
 
   const text = response.text?.trim() || "";
+  console.log("Gemini raw response:", response);
+  emitGeminiDebug("info", "Gemini full response metadata", {
+    imageUrl,
+    responseMeta: extractGeminiResponseMeta(response),
+  });
+  emitGeminiDebug("info", "Gemini raw image analysis response", {
+    imageUrl,
+    rawResponse: text,
+  });
+
   if (!text) {
+    emitGeminiDebug("warn", "Gemini returned an empty image analysis response", { imageUrl });
     return null;
   }
 
   const jsonStart = text.indexOf("{");
   const jsonEnd = text.lastIndexOf("}");
   if (jsonStart === -1 || jsonEnd === -1) {
+    emitGeminiDebug("warn", "Gemini response did not contain JSON", {
+      imageUrl,
+      rawResponse: text,
+    });
     return null;
   }
 
-  return JSON.parse(text.slice(jsonStart, jsonEnd + 1)) as GeminiIssueAssessment;
+  const parsed = JSON.parse(text.slice(jsonStart, jsonEnd + 1)) as GeminiIssueAssessment;
+  setCachedAssessment(imageUrl, parsed);
+  emitGeminiDebug("info", "Gemini parsed image analysis response", {
+    imageUrl,
+    parsedResponse: parsed,
+  });
+
+  return parsed;
+}
+
+function buildClassificationDescription(result: GeminiIssueAssessment): string {
+  if (result.explanation?.trim()) {
+    return result.explanation.trim();
+  }
+
+  if (result.summary?.trim()) {
+    return result.summary.trim();
+  }
+
+  switch (result.category) {
+    case "garbage":
+      return "Garbage or waste detected in the uploaded image.";
+    case "pothole":
+      return "Road damage or pothole detected in the uploaded image.";
+    case "water_leakage":
+      return "Water leakage or drain issue detected in the uploaded image.";
+    default:
+      return "Civic issue detected in the uploaded image.";
+  }
+}
+
+function buildImageRejectionSummary(result: GeminiIssueAssessment): string {
+  if (!result.isRealImage || result.containsScreenOrDevice) {
+    return `Fake image detected. The image appears to show ${result.imageSubject || "a non-real or screen-based scene"}.`;
+  }
+
+  if (!result.detected || result.category === "other") {
+    return `Issue not detected. The image appears to show ${result.imageSubject || "something unrelated"}.`;
+  }
+
+  return "Image verification failed. Upload a clearer live photo of the garbage or civic issue.";
 }
 
 function buildRejectedResult(
   summary: string,
-  overrides?: Partial<Pick<VerificationResult, "authenticityScore" | "confidenceScore" | "category" | "priority" | "aiDescription">>,
+  overrides?: Partial<
+    Pick<
+      VerificationResult,
+      | "authenticityScore"
+      | "confidenceScore"
+      | "authenticityConfidence"
+      | "authenticityExplanation"
+      | "confidence"
+      | "coveragePercentage"
+      | "densityScore"
+      | "detected"
+      | "explanation"
+      | "isRealImage"
+      | "imageSubject"
+      | "category"
+      | "priority"
+      | "aiDescription"
+    >
+  >,
 ): VerificationResult {
   return {
     accepted: false,
@@ -161,6 +385,15 @@ function buildRejectedResult(
     verificationSummary: summary,
     authenticityScore: overrides?.authenticityScore ?? 0,
     confidenceScore: overrides?.confidenceScore ?? 0,
+    authenticityConfidence: overrides?.authenticityConfidence ?? 0,
+    authenticityExplanation: overrides?.authenticityExplanation ?? summary,
+    confidence: overrides?.confidence ?? 0,
+    coveragePercentage: overrides?.coveragePercentage ?? 0,
+    densityScore: overrides?.densityScore ?? 0,
+    detected: overrides?.detected ?? false,
+    explanation: overrides?.explanation ?? summary,
+    isRealImage: overrides?.isRealImage ?? false,
+    imageSubject: overrides?.imageSubject ?? "",
     category: overrides?.category ?? "other",
     priority: overrides?.priority ?? "low",
     aiDescription: overrides?.aiDescription ?? summary,
@@ -169,10 +402,6 @@ function buildRejectedResult(
 }
 
 export async function precheckIssueImage(input: Pick<VerificationInput, "imageUrl" | "imageSource">): Promise<VerificationResult> {
-  if (input.imageSource !== "camera") {
-    return buildRejectedResult("Invalid image. Only fresh camera photos are allowed.");
-  }
-
   const geminiResult = await analyzeWithGemini(input.imageUrl).catch(() => null);
   if (!geminiResult) {
     return buildRejectedResult(
@@ -181,22 +410,41 @@ export async function precheckIssueImage(input: Pick<VerificationInput, "imageUr
   }
 
   const acceptedImage =
-    geminiResult.isAuthentic &&
-    geminiResult.isPublicCivicIssue &&
+    geminiResult.isRealImage &&
+    geminiResult.detected &&
     !geminiResult.containsScreenOrDevice &&
-    geminiResult.authenticityScore >= 0.88 &&
-    geminiResult.civicRelevanceScore >= 0.72 &&
-    geminiResult.confidenceScore >= 0.75;
+    geminiResult.authenticityConfidence >= 0.72 &&
+    geminiResult.confidence >= 0.58;
+
+  emitGeminiDebug("info", "Issue image verification decision", {
+    imageUrl: input.imageUrl,
+    imageSource: input.imageSource,
+    acceptedImage,
+    thresholds: {
+      minAuthenticityConfidence: 0.72,
+      minConfidence: 0.58,
+    },
+    geminiResult,
+  });
 
   if (!acceptedImage) {
     return buildRejectedResult(
-      "Invalid image. Capture a clear live photo of the civic issue. Screens, laptops, and unrelated objects are rejected.",
+      buildImageRejectionSummary(geminiResult),
       {
-        authenticityScore: geminiResult.authenticityScore,
-        confidenceScore: geminiResult.confidenceScore,
+        authenticityScore: geminiResult.authenticityConfidence,
+        confidenceScore: geminiResult.confidence,
+        authenticityConfidence: geminiResult.authenticityConfidence,
+        authenticityExplanation: geminiResult.authenticityExplanation,
+        confidence: geminiResult.confidence,
+        coveragePercentage: geminiResult.coveragePercentage,
+        densityScore: geminiResult.densityScore,
+        detected: geminiResult.detected,
+        explanation: geminiResult.explanation,
+        isRealImage: geminiResult.isRealImage,
+        imageSubject: geminiResult.imageSubject,
         category: geminiResult.category,
         priority: geminiResult.priority,
-        aiDescription: geminiResult.summary,
+        aiDescription: geminiResult.explanation || geminiResult.summary,
       },
     );
   }
@@ -204,19 +452,75 @@ export async function precheckIssueImage(input: Pick<VerificationInput, "imageUr
   return {
     accepted: true,
     verificationStatus: "verified",
-    verificationSummary: "Image authenticity and civic relevance checks passed.",
-    authenticityScore: geminiResult.authenticityScore,
-    confidenceScore: geminiResult.confidenceScore,
+    verificationSummary:
+      geminiResult.category === "garbage"
+        ? "Real garbage image detected and verified."
+        : "Real civic issue image detected and verified.",
+    authenticityScore: geminiResult.authenticityConfidence,
+    confidenceScore: geminiResult.confidence,
+    authenticityConfidence: geminiResult.authenticityConfidence,
+    authenticityExplanation: geminiResult.authenticityExplanation,
+    confidence: geminiResult.confidence,
+    coveragePercentage: geminiResult.coveragePercentage,
+    densityScore: geminiResult.densityScore,
+    detected: geminiResult.detected,
+    explanation: geminiResult.explanation,
+    isRealImage: geminiResult.isRealImage,
+    imageSubject: geminiResult.imageSubject,
     category: geminiResult.category,
     priority: geminiResult.priority,
-    aiDescription: geminiResult.summary,
+    aiDescription: geminiResult.explanation || geminiResult.summary,
     locationVerified: false,
   };
+}
+
+export async function classifyIssueImage(imageUrl: string): Promise<ImageClassificationResult> {
+  const geminiResult = await analyzeWithGemini(imageUrl).catch(() => null);
+
+  if (!geminiResult) {
+    emitGeminiDebug("warn", "Gemini image classification failed", { imageUrl });
+    return {
+      category: "other",
+      priority: "low",
+      confidence: 0.5,
+      description: "Could not confidently classify the uploaded image.",
+    };
+  }
+
+  const result = {
+    category: geminiResult.category,
+    priority: geminiResult.priority,
+    confidence: geminiResult.confidence,
+    description: buildClassificationDescription(geminiResult),
+  };
+
+  emitGeminiDebug("info", "Issue image classification result", {
+    imageUrl,
+    classification: result,
+    geminiResult,
+  });
+
+  return result;
 }
 
 export async function verifyIssueSubmission(
   input: VerificationInput,
 ): Promise<VerificationResult> {
+  if (FORCE_MOCK_IMAGE_VERIFICATION) {
+    const imageVerification = await precheckIssueImage({
+      imageUrl: input.imageUrl,
+      imageSource: input.imageSource,
+    });
+
+    return {
+      ...imageVerification,
+      accepted: true,
+      verificationStatus: "verified",
+      verificationSummary: "Mock verification enabled. Issue accepted without Gemini or location checks.",
+      locationVerified: true,
+    };
+  }
+
   const imageVerification = await precheckIssueImage({
     imageUrl: input.imageUrl,
     imageSource: input.imageSource,
@@ -236,20 +540,19 @@ export async function verifyIssueSubmission(
       input.captureLongitude,
     ) <= 0.75;
 
-  const accepted = imageVerification.accepted && locationVerified;
+  const galleryUploadAccepted = input.imageSource === "gallery" && imageVerification.accepted;
+  const accepted = imageVerification.accepted && (locationVerified || galleryUploadAccepted);
 
   return {
+    ...imageVerification,
     accepted,
     verificationStatus: accepted ? "verified" : "rejected",
     verificationSummary: accepted
-      ? "Image and location checks passed."
+      ? input.imageSource === "gallery"
+        ? "Image checks passed for gallery upload."
+        : "Image and location checks passed."
       : "Location verification failed. Capture the image at the issue location and try again.",
-    authenticityScore: imageVerification.authenticityScore,
-    confidenceScore: imageVerification.confidenceScore,
-    category: imageVerification.category,
-    priority: imageVerification.priority,
-    aiDescription: imageVerification.aiDescription,
-    locationVerified,
+    locationVerified: locationVerified || galleryUploadAccepted,
   };
 }
 
@@ -261,6 +564,14 @@ export async function verifyWorkerReportImage(imageUrl: string | null) {
     };
   }
 
+  if (FORCE_MOCK_IMAGE_VERIFICATION) {
+    emitGeminiDebug("warn", "Worker image accepted in mock mode", { imageUrl });
+    return {
+      status: "verified" as const,
+      summary: "Mock verification enabled. Worker report image accepted.",
+    };
+  }
+
   const geminiResult = await analyzeWithGemini(imageUrl).catch(() => null);
   if (!geminiResult) {
     return {
@@ -269,12 +580,12 @@ export async function verifyWorkerReportImage(imageUrl: string | null) {
     };
   }
 
-  const authenticityScore = geminiResult.authenticityScore;
   const acceptedImage =
-    geminiResult.isAuthentic &&
+    geminiResult.isRealImage &&
+    geminiResult.detected &&
     !geminiResult.containsScreenOrDevice &&
-    authenticityScore >= 0.8 &&
-    geminiResult.confidenceScore >= 0.7;
+    geminiResult.authenticityConfidence >= 0.8 &&
+    geminiResult.confidence >= 0.7;
 
   return {
     status: acceptedImage ? ("verified" as const) : ("rejected" as const),
