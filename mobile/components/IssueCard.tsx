@@ -11,6 +11,33 @@ interface Props {
   onUpvote?: () => void;
 }
 
+const categoryConfig = {
+  garbage: {
+    icon: "trash-2",
+    label: "Garbage",
+    color: Colors.categoryGarbage,
+    bg: Colors.categoryGarbageBg,
+  },
+  pothole: {
+    icon: "alert-triangle",
+    label: "Pothole",
+    color: Colors.categoryPothole,
+    bg: Colors.categoryPotholeBg,
+  },
+  water_leakage: {
+    icon: "droplet",
+    label: "Water Leakage",
+    color: Colors.categoryWater,
+    bg: Colors.categoryWaterBg,
+  },
+  other: {
+    icon: "help-circle",
+    label: "Other",
+    color: Colors.categoryOther,
+    bg: Colors.categoryOtherBg,
+  },
+} as const;
+
 export function IssueCard({ issue, onPress, onUpvote }: Props) {
   const priorityColor = {
     high: Colors.priorityHigh,
@@ -36,57 +63,73 @@ export function IssueCard({ issue, onPress, onUpvote }: Props) {
     resolved: Colors.statusResolvedBg,
   }[issue.status];
 
-  const categoryIcon = {
-    garbage: "trash-2",
-    pothole: "alert-triangle",
-    water_leakage: "droplet",
-    other: "help-circle",
-  }[issue.category] as any;
-
-  const categoryLabel = {
-    garbage: "Garbage",
-    pothole: "Pothole",
-    water_leakage: "Water Leakage",
-    other: "Other",
-  }[issue.category];
-
   const statusLabel = {
     pending: "Pending",
     in_progress: "In Progress",
     resolved: "Resolved",
   }[issue.status];
 
+  const category = categoryConfig[issue.category];
+
   return (
     <Pressable
-      style={({ pressed }) => [styles.card, pressed && { opacity: 0.95, transform: [{ scale: 0.99 }] }]}
+      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
       onPress={onPress}
     >
-      <Image source={{ uri: issue.imageUrl }} style={styles.image} resizeMode="cover" />
+      <View style={styles.mediaWrap}>
+        <Image source={{ uri: issue.imageUrl }} style={styles.image} resizeMode="cover" />
+        <View style={styles.imageOverlay} />
+        <View style={styles.topBadges}>
+          <View style={[styles.pill, { backgroundColor: priorityBg }]}>
+            <Text style={[styles.pillText, { color: priorityColor }]}>
+              {issue.priority.charAt(0).toUpperCase() + issue.priority.slice(1)}
+            </Text>
+          </View>
+          <View style={[styles.pill, { backgroundColor: statusBg }]}>
+            <Text style={[styles.pillText, { color: statusColor }]}>{statusLabel}</Text>
+          </View>
+        </View>
+      </View>
 
       <View style={styles.content}>
-        <View style={styles.header}>
-          <View style={styles.badges}>
-            <View style={[styles.badge, { backgroundColor: priorityBg }]}>
-              <Text style={[styles.badgeText, { color: priorityColor }]}>
-                {issue.priority.charAt(0).toUpperCase() + issue.priority.slice(1)}
-              </Text>
+        <View style={styles.headlineRow}>
+          <View style={styles.categoryTag}>
+            <View style={[styles.categoryIconWrap, { backgroundColor: category.bg }]}>
+              <Feather name={category.icon as any} size={13} color={category.color} />
             </View>
-            <View style={[styles.badge, { backgroundColor: statusBg }]}>
-              <Text style={[styles.badgeText, { color: statusColor }]}>{statusLabel}</Text>
-            </View>
+            <Text style={styles.categoryText}>{category.label}</Text>
           </View>
           <Text style={styles.time}>{formatDistanceToNow(issue.createdAt)}</Text>
         </View>
 
         <Text style={styles.title} numberOfLines={2}>{issue.title}</Text>
+        <Text style={styles.description} numberOfLines={2}>
+          {issue.description}
+        </Text>
+
+        {issue.address ? (
+          <View style={styles.locationRow}>
+            <Feather name="map-pin" size={13} color={Colors.textTertiary} />
+            <Text style={styles.locationText} numberOfLines={1}>{issue.address}</Text>
+          </View>
+        ) : null}
+
+        {typeof issue.distanceKm === "number" ? (
+          <View style={styles.distanceRow}>
+            <Feather name="navigation" size={13} color={Colors.primary} />
+            <Text style={styles.distanceText}>{issue.distanceKm.toFixed(1)} km away</Text>
+          </View>
+        ) : null}
 
         <View style={styles.footer}>
-          <View style={styles.category}>
-            <Feather name={categoryIcon} size={13} color={Colors.textSecondary} />
-            <Text style={styles.categoryText}>{categoryLabel}</Text>
+          <View style={styles.metaCluster}>
+            <View style={styles.metaPill}>
+              <Feather name="arrow-up-right" size={13} color={Colors.textSecondary} />
+              <Text style={styles.metaPillText}>{issue.upvotes} upvotes</Text>
+            </View>
           </View>
           <Pressable
-            style={styles.upvote}
+            style={[styles.upvoteBtn, issue.hasUpvoted && styles.upvoteBtnActive]}
             onPress={(event) => {
               event.stopPropagation();
               onUpvote?.();
@@ -97,18 +140,11 @@ export function IssueCard({ issue, onPress, onUpvote }: Props) {
               size={18}
               color={issue.hasUpvoted ? Colors.primary : Colors.textSecondary}
             />
-            <Text style={[styles.upvoteText, issue.hasUpvoted && { color: Colors.primary }]}>
-              {issue.upvotes}
+            <Text style={[styles.upvoteText, issue.hasUpvoted && styles.upvoteTextActive]}>
+              Support
             </Text>
           </Pressable>
         </View>
-
-        {issue.address && (
-          <View style={styles.location}>
-            <Feather name="map-pin" size={12} color={Colors.textTertiary} />
-            <Text style={styles.locationText} numberOfLines={1}>{issue.address}</Text>
-          </View>
-        )}
       </View>
     </Pressable>
   );
@@ -117,89 +153,165 @@ export function IssueCard({ issue, onPress, onUpvote }: Props) {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: Colors.surface,
-    borderRadius: 16,
+    borderRadius: 24,
     marginHorizontal: 16,
-    marginVertical: 6,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    marginVertical: 7,
+    borderWidth: 1,
+    borderColor: Colors.border,
     overflow: "hidden",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.06,
+    shadowRadius: 20,
+    elevation: 3,
+  },
+  cardPressed: {
+    opacity: 0.97,
+    transform: [{ scale: 0.992 }],
+  },
+  mediaWrap: {
+    position: "relative",
+    height: 176,
+    backgroundColor: Colors.borderLight,
   },
   image: {
     width: "100%",
-    height: 160,
+    height: "100%",
     backgroundColor: Colors.borderLight,
   },
+  imageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(10, 25, 47, 0.08)",
+  },
+  topBadges: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    right: 12,
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  pill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  pillText: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+  },
   content: {
-    padding: 14,
+    padding: 16,
+    gap: 10,
+  },
+  headlineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  categoryTag: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
-  header: {
-    flexDirection: "row",
+  categoryIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: "center",
-    justifyContent: "space-between",
-  },
-  badges: {
-    flexDirection: "row",
-    gap: 6,
-  },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 20,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: "600" as const,
-  },
-  time: {
-    fontSize: 11,
-    color: Colors.textTertiary,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: "600" as const,
-    color: Colors.text,
-    lineHeight: 22,
-  },
-  footer: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  category: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
+    justifyContent: "center",
   },
   categoryText: {
     fontSize: 13,
     color: Colors.textSecondary,
+    fontWeight: "700" as const,
   },
-  upvote: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: Colors.background,
-    borderRadius: 20,
-  },
-  upvoteText: {
-    fontSize: 13,
-    fontWeight: "600" as const,
-    color: Colors.textSecondary,
-  },
-  location: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  locationText: {
+  time: {
     fontSize: 12,
     color: Colors.textTertiary,
+    fontWeight: "600" as const,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: "800" as const,
+    color: Colors.text,
+    lineHeight: 24,
+  },
+  description: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    lineHeight: 20,
+  },
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  locationText: {
     flex: 1,
+    fontSize: 13,
+    color: Colors.textTertiary,
+  },
+  distanceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  distanceText: {
+    fontSize: 12,
+    color: Colors.primary,
+    fontWeight: "700" as const,
+  },
+  footer: {
+    marginTop: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  metaCluster: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+  },
+  metaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: Colors.background,
+  },
+  metaPillText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    fontWeight: "700" as const,
+  },
+  upvoteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  upvoteBtnActive: {
+    backgroundColor: Colors.primaryLight,
+    borderColor: "#B8D0F2",
+  },
+  upvoteText: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    color: Colors.textSecondary,
+  },
+  upvoteTextActive: {
+    color: Colors.primary,
   },
 });
