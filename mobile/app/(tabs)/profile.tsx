@@ -78,7 +78,7 @@ export default function ProfileScreen() {
   }
 
   const issues = data?.issues ?? [];
-  const resolvedCount = issues.filter((issue) => issue.status === "resolved").length;
+  const resolvedCount = issues.filter((issue) => ["resolved", "closed"].includes(issue.status)).length;
   const pendingCount = issues.filter((issue) => issue.status === "pending").length;
   const inProgressCount = issues.filter((issue) => issue.status === "in_progress").length;
 

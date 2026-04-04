@@ -88,7 +88,7 @@ export default function HomeScreen() {
   const [loadingLocation, setLoadingLocation] = useState(true);
   const [locationError, setLocationError] = useState<string | null>(null);
 
-  const statusParam = statusFilterMap[statusFilter];
+  const statusParam = statusFilter === "Resolved" ? undefined : statusFilterMap[statusFilter];
   const categoryParam = categoryFilterMap[categoryFilter];
 
   async function loadNearbyLocation() {
@@ -147,12 +147,12 @@ export default function HomeScreen() {
   const bottomPadding = Platform.OS === "web" ? 34 : 0;
   const wideLayout = width >= 820;
 
-  const issues = data?.issues ?? [];
+  const issues = (data?.issues ?? []).filter((issue) => statusFilter === "Resolved" ? ["resolved", "closed"].includes(issue.status) : true);
 
   const stats = useMemo<StatCard[]>(() => {
     const pending = issues.filter((issue) => issue.status === "pending").length;
     const inProgress = issues.filter((issue) => issue.status === "in_progress").length;
-    const resolved = issues.filter((issue) => issue.status === "resolved").length;
+    const resolved = issues.filter((issue) => ["resolved", "closed"].includes(issue.status)).length;
     const highPriority = issues.filter((issue) => issue.priority === "high").length;
 
     return [

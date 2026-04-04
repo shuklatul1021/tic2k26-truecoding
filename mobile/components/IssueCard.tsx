@@ -55,18 +55,21 @@ export function IssueCard({ issue, onPress, onUpvote }: Props) {
     pending: Colors.statusPending,
     in_progress: Colors.statusInProgress,
     resolved: Colors.statusResolved,
+    closed: Colors.statusResolved,
   }[issue.status];
 
   const statusBg = {
     pending: Colors.statusPendingBg,
     in_progress: Colors.statusInProgressBg,
     resolved: Colors.statusResolvedBg,
+    closed: Colors.statusResolvedBg,
   }[issue.status];
 
   const statusLabel = {
     pending: "Pending",
     in_progress: "In Progress",
     resolved: "Resolved",
+    closed: "Closed",
   }[issue.status];
 
   const category = categoryConfig[issue.category];

@@ -11,9 +11,11 @@ import {
   View,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
+import { useQuery } from "@tanstack/react-query";
 import * as ImagePicker from "expo-image-picker";
 import Colors from "@/constants/colors";
-import { uploadApi, workersApi } from "@/lib/api";
+import { issuesApi, uploadApi, workersApi } from "@/lib/api";
+import { getStatusLabel } from "@/lib/utils";
 
 export default function WorkerReportScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -22,6 +24,15 @@ export default function WorkerReportScreen() {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const issueId = Number(id);
+  const { data: issue } = useQuery({
+    queryKey: ["issue", id],
+    queryFn: () => issuesApi.getById(issueId),
+    enabled: Number.isFinite(issueId),
+  });
+
+  const isReadOnly = issue?.status === "closed" || issue?.status === "resolved";
 
   async function captureProof() {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
@@ -48,6 +59,11 @@ export default function WorkerReportScreen() {
       return;
     }
 
+    if (isReadOnly) {
+      Alert.alert("Issue closed", "This issue is closed for further updates.");
+      return;
+    }
+
     try {
       setSubmitting(true);
       await workersApi.submitReport(Number(id), {
@@ -70,6 +86,13 @@ export default function WorkerReportScreen() {
       <Text style={styles.subheading}>Update what you completed today and attach fresh proof.</Text>
 
       <View style={styles.card}>
+        {isReadOnly ? (
+          <View style={styles.readOnlyBox}>
+            <Text style={styles.readOnlyTitle}>Updates locked</Text>
+            <Text style={styles.readOnlyText}>This issue is already {getStatusLabel(issue?.status || "closed").toLowerCase()}. You can only view history now.</Text>
+          </View>
+        ) : null}
+
         <Text style={styles.label}>Today&apos;s progress</Text>
         <TextInput
           style={styles.textArea}
@@ -84,20 +107,20 @@ export default function WorkerReportScreen() {
 
         <Text style={styles.label}>Task status</Text>
         <View style={styles.row}>
-          {["in_progress", "resolved"].map((item) => (
+          {["in_progress", "completed"].map((item) => (
             <Pressable key={item} style={[styles.chip, status === item && styles.chipActive]} onPress={() => setStatus(item)}>
               <Text style={[styles.chipText, status === item && styles.chipTextActive]}>{item.replace(/_/g, " ")}</Text>
             </Pressable>
           ))}
         </View>
 
-        <Pressable style={styles.captureBtn} onPress={captureProof}>
+        <Pressable style={[styles.captureBtn, isReadOnly && styles.submitDisabled]} onPress={captureProof} disabled={isReadOnly}>
           <Text style={styles.captureText}>{imageUri ? "Retake proof image" : "Capture proof image"}</Text>
         </Pressable>
 
         {imageUri && <Image source={{ uri: imageUri }} style={styles.image} />}
 
-        <Pressable style={[styles.submitBtn, submitting && styles.submitDisabled]} onPress={submit} disabled={submitting}>
+        <Pressable style={[styles.submitBtn, (submitting || isReadOnly) && styles.submitDisabled]} onPress={submit} disabled={submitting || isReadOnly}>
           {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>Submit Daily Report</Text>}
         </Pressable>
       </View>
@@ -111,6 +134,14 @@ const styles = StyleSheet.create({
   heading: { fontSize: 28, fontWeight: "800" as const, color: Colors.text, marginTop: 18 },
   subheading: { fontSize: 14, color: Colors.textSecondary, lineHeight: 20 },
   card: { backgroundColor: Colors.surface, borderRadius: 24, padding: 20, gap: 14 },
+  readOnlyBox: {
+    borderRadius: 14,
+    padding: 14,
+    backgroundColor: Colors.successLight,
+    gap: 4,
+  },
+  readOnlyTitle: { fontSize: 14, fontWeight: "800" as const, color: Colors.success },
+  readOnlyText: { fontSize: 13, lineHeight: 18, color: Colors.textSecondary },
   label: { fontSize: 14, fontWeight: "600" as const, color: Colors.text },
   textArea: {
     minHeight: 120,

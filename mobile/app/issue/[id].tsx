@@ -49,6 +49,7 @@ export default function IssueDetailScreen() {
   const { user } = useAuth();
   const qc = useQueryClient();
   const [showBefore, setShowBefore] = useState(true);
+  const [detailTab, setDetailTab] = useState<"issue" | "updates">("issue");
   const [assignmentStartDate, setAssignmentStartDate] = useState("");
   const [assignmentEndDate, setAssignmentEndDate] = useState("");
   const [pickerTarget, setPickerTarget] = useState<PickerTarget>(null);
@@ -64,6 +65,12 @@ export default function IssueDetailScreen() {
     setAssignmentStartDate(extractDateValue(issue.assignmentStartAt));
     setAssignmentEndDate(extractDateValue(issue.dueAt));
   }, [issue?.id, issue?.assignmentStartAt, issue?.dueAt]);
+
+  useEffect(() => {
+    if (!issue?.assignedWorkerId && detailTab === "updates") {
+      setDetailTab("issue");
+    }
+  }, [detailTab, issue?.assignedWorkerId]);
 
   const upvoteMutation = useMutation({
     mutationFn: () => issuesApi.upvote(issueId),
@@ -105,13 +112,23 @@ export default function IssueDetailScreen() {
   });
 
   const statusMutation = useMutation({
-    mutationFn: (status: "in_progress" | "resolved") => issuesApi.update(issueId, { status }),
+    mutationFn: (status: "in_progress" | "closed") => issuesApi.update(issueId, { status }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["issue", id] });
       qc.invalidateQueries({ queryKey: ["issues"] });
       qc.invalidateQueries({ queryKey: ["admin-stats"] });
     },
     onError: (error: Error) => Alert.alert("Status update failed", error.message),
+  });
+
+  const verifyResolutionMutation = useMutation({
+    mutationFn: () => issuesApi.verifyResolution(issueId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["issue", id] });
+      qc.invalidateQueries({ queryKey: ["issues"] });
+      Alert.alert("Completion verified", "Your verification was sent to the admin for final closure.");
+    },
+    onError: (error: Error) => Alert.alert("Verification failed", error.message),
   });
 
   const { data: nearbyWorkers } = useQuery({
@@ -138,9 +155,9 @@ export default function IssueDetailScreen() {
 
   const priorityColor = { high: Colors.priorityHigh, medium: Colors.priorityMedium, low: Colors.priorityLow }[issue.priority];
   const priorityBg = { high: Colors.priorityHighBg, medium: Colors.priorityMediumBg, low: Colors.priorityLowBg }[issue.priority];
-  const statusColor = { pending: Colors.statusPending, in_progress: Colors.statusInProgress, resolved: Colors.statusResolved }[issue.status];
-  const statusBg = { pending: Colors.statusPendingBg, in_progress: Colors.statusInProgressBg, resolved: Colors.statusResolvedBg }[issue.status];
-  const timelineIconColor = { pending: Colors.statusPending, in_progress: Colors.statusInProgress, resolved: Colors.statusResolved };
+  const statusColor = { pending: Colors.statusPending, in_progress: Colors.statusInProgress, resolved: Colors.statusResolved, closed: Colors.statusResolved }[issue.status];
+  const statusBg = { pending: Colors.statusPendingBg, in_progress: Colors.statusInProgressBg, resolved: Colors.statusResolvedBg, closed: Colors.statusResolvedBg }[issue.status];
+  const timelineIconColor = { pending: Colors.statusPending, in_progress: Colors.statusInProgress, completed: Colors.success, resolved: Colors.statusResolved, closed: Colors.statusResolved };
 
   const originalStartDate = extractDateValue(issue.assignmentStartAt);
   const originalEndDate = extractDateValue(issue.dueAt);
@@ -148,6 +165,7 @@ export default function IssueDetailScreen() {
   const hasCompleteSchedule = Boolean(assignmentStartDate && assignmentEndDate);
   const hasValidScheduleRange = hasCompleteSchedule && assignmentEndDate >= assignmentStartDate;
   const isInProgressLocked = Boolean(issue.inProgressLockedUntil && new Date(issue.inProgressLockedUntil).getTime() > Date.now());
+  const isClosed = issue.status === "closed" || issue.status === "resolved";
   const canAssignWorker = hasValidScheduleRange;
   const canSaveSchedule = Boolean(issue.assignedWorkerId && hasValidScheduleRange && hasScheduleChanges);
   const canShowUpvote = !user || (user.role === "user" && user.id !== issue.userId);
@@ -223,10 +241,32 @@ export default function IssueDetailScreen() {
             </View>
           ) : null}
 
+          {user?.role === "user" && user.id === issue.userId ? (
+            <View style={styles.infoCard}>
+              <Text style={styles.infoTitle}>Reporter Verification</Text>
+              <Text style={styles.infoText}>
+                {issue.reporterVerifiedResolution
+                  ? `You verified the completed work${issue.resolutionVerifiedByUserAt ? ` on ${formatDate(issue.resolutionVerifiedByUserAt)}` : ""}.`
+                  : issue.latestWorkerReportStatus === "completed"
+                    ? "The assigned worker marked this task completed. Verify it after checking the work on site."
+                    : "You can verify this issue only after the assigned worker marks the task completed."}
+              </Text>
+              {issue.canReporterVerifyResolution ? (
+                <Pressable
+                  style={[styles.saveBtn, verifyResolutionMutation.isPending && styles.buttonDisabled]}
+                  onPress={() => verifyResolutionMutation.mutate()}
+                  disabled={verifyResolutionMutation.isPending}
+                >
+                  {verifyResolutionMutation.isPending ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Verify Completed Work</Text>}
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+
           {user?.role === "admin" ? (
             <View style={styles.adminCard}>
               <Text style={styles.sectionTitle}>Admin Assignment</Text>
-              <Text style={styles.helperText}>Choose start and end dates, then assign one worker. Reassignment is blocked once someone is assigned.</Text>
+              <Text style={styles.helperText}>Choose start and end dates, then assign one worker. Closure is allowed only after worker completion and reporter verification.</Text>
 
               <View style={styles.scheduleRow}>
                 <Pressable style={styles.dateCard} onPress={() => setPickerTarget("start")}>
@@ -247,28 +287,30 @@ export default function IssueDetailScreen() {
 
               <View style={styles.statusRow}>
                 <Pressable
-                  style={[styles.statusBtn, (statusMutation.isPending || issue.status === "resolved" || isInProgressLocked) && styles.buttonDisabled]}
+                  style={[styles.statusBtn, (statusMutation.isPending || isClosed || isInProgressLocked) && styles.buttonDisabled]}
                   onPress={() => statusMutation.mutate("in_progress")}
-                  disabled={statusMutation.isPending || issue.status === "resolved" || isInProgressLocked}
+                  disabled={statusMutation.isPending || isClosed || isInProgressLocked}
                 >
                   <Text style={styles.statusBtnText}>Mark In Progress</Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.statusBtn, styles.statusBtnResolve, (statusMutation.isPending || issue.status === "resolved" || !issue.canAdminMarkResolved) && styles.buttonDisabled]}
-                  onPress={() => statusMutation.mutate("resolved")}
-                  disabled={statusMutation.isPending || issue.status === "resolved" || !issue.canAdminMarkResolved}
+                  style={[styles.statusBtn, styles.statusBtnResolve, (statusMutation.isPending || isClosed || !issue.canAdminCloseIssue) && styles.buttonDisabled]}
+                  onPress={() => statusMutation.mutate("closed")}
+                  disabled={statusMutation.isPending || isClosed || !issue.canAdminCloseIssue}
                 >
-                  <Text style={styles.statusBtnResolveText}>Confirm Resolved</Text>
+                  <Text style={styles.statusBtnResolveText}>Close Issue</Text>
                 </Pressable>
               </View>
 
               {isInProgressLocked && issue.inProgressLockedUntil ? <Text style={styles.ruleText}>In-progress can be clicked again after {formatDate(issue.inProgressLockedUntil)}.</Text> : null}
-              {!issue.canAdminMarkResolved ? <Text style={styles.ruleText}>Admin can resolve only after the assigned worker sends a resolved report.</Text> : null}
+              {!issue.reporterVerifiedResolution ? <Text style={styles.ruleText}>Reporter verification is still pending.</Text> : null}
+              {!issue.canAdminCloseIssue ? <Text style={styles.ruleText}>Admin can close only after worker completion and reporter verification.</Text> : null}
 
               <View style={styles.workflowBox}>
-                <Text style={styles.workflowTitle}>Worker progress gate</Text>
+                <Text style={styles.workflowTitle}>Closure gate</Text>
                 <Text style={styles.workflowText}>Latest worker update: {issue.latestWorkerReportStatus ? getStatusLabel(issue.latestWorkerReportStatus) : "No worker update yet"}</Text>
-                <Text style={styles.workflowText}>Worker resolved at: {issue.workerMarkedResolvedAt ? `${formatDate(issue.workerMarkedResolvedAt)} ${formatTime(issue.workerMarkedResolvedAt)}` : "Pending"}</Text>
+                <Text style={styles.workflowText}>Worker completed at: {issue.workerMarkedCompletedAt ? `${formatDate(issue.workerMarkedCompletedAt)} ${formatTime(issue.workerMarkedCompletedAt)}` : "Pending"}</Text>
+                <Text style={styles.workflowText}>Reporter verified: {issue.reporterVerifiedResolution ? "Yes" : "Pending"}</Text>
               </View>
 
               <Text style={styles.workerSectionTitle}>Nearby Workers</Text>
@@ -310,35 +352,53 @@ export default function IssueDetailScreen() {
             </Pressable>
           ) : null}
 
-          <View style={styles.divider} />
-          <Text style={styles.sectionTitle}>Timeline</Text>
-          {(issue.timeline ?? []).map((event, idx) => (
-            <View key={event.id} style={styles.timelineItem}>
-              <View style={styles.timelineLeft}>
-                <View style={[styles.timelineDot, { backgroundColor: timelineIconColor[event.status as keyof typeof timelineIconColor] || Colors.textSecondary }]} />
-                {idx < (issue.timeline?.length ?? 0) - 1 ? <View style={styles.timelineLine} /> : null}
-              </View>
-              <View style={styles.timelineContent}>
-                <Text style={styles.timelineStatus}>{getStatusLabel(event.status)}</Text>
-                {event.note ? <Text style={styles.timelineNote}>{event.note}</Text> : null}
-                {event.createdBy ? <Text style={styles.timelineBy}>by {event.createdBy}</Text> : null}
-                <Text style={styles.timelineDate}>{formatDate(event.createdAt)} | {formatTime(event.createdAt)}</Text>
-              </View>
+          {issue.assignedWorkerId ? (
+            <View style={styles.detailToggleWrap}>
+              <Pressable style={[styles.detailToggleBtn, detailTab === "issue" && styles.detailToggleBtnActive]} onPress={() => setDetailTab("issue")}>
+                <Text style={[styles.detailToggleText, detailTab === "issue" && styles.detailToggleTextActive]}>Issue</Text>
+              </Pressable>
+              <Pressable style={[styles.detailToggleBtn, detailTab === "updates" && styles.detailToggleBtnActive]} onPress={() => setDetailTab("updates")}>
+                <Text style={[styles.detailToggleText, detailTab === "updates" && styles.detailToggleTextActive]}>Daily Updates</Text>
+              </Pressable>
             </View>
-          ))}
-          {(issue.timeline?.length ?? 0) === 0 ? <Text style={styles.emptyText}>No timeline events yet</Text> : null}
+          ) : null}
 
-          <View style={styles.divider} />
-          <Text style={styles.sectionTitle}>Worker Daily Reports</Text>
-          {(issue.workerReports ?? []).map((report) => (
-            <View key={report.id} style={styles.reportCard}>
-              <Text style={styles.reportTitle}>{report.workerName || "Worker"} | {report.status.replace(/_/g, " ")}</Text>
-              <Text style={styles.reportBody}>{report.note}</Text>
-              <Text style={styles.reportMeta}>{report.imageVerificationSummary || "Image verification pending"}</Text>
-              <Text style={styles.reportMeta}>{formatDate(report.createdAt)} | {formatTime(report.createdAt)}</Text>
-            </View>
-          ))}
-          {(issue.workerReports?.length ?? 0) === 0 ? <Text style={styles.emptyText}>No worker reports yet</Text> : null}
+          {detailTab === "issue" ? (
+            <>
+              <View style={styles.divider} />
+              <Text style={styles.sectionTitle}>Timeline</Text>
+              {(issue.timeline ?? []).map((event, idx) => (
+                <View key={event.id} style={styles.timelineItem}>
+                  <View style={styles.timelineLeft}>
+                    <View style={[styles.timelineDot, { backgroundColor: timelineIconColor[event.status as keyof typeof timelineIconColor] || Colors.textSecondary }]} />
+                    {idx < (issue.timeline?.length ?? 0) - 1 ? <View style={styles.timelineLine} /> : null}
+                  </View>
+                  <View style={styles.timelineContent}>
+                    <Text style={styles.timelineStatus}>{getStatusLabel(event.status)}</Text>
+                    {event.note ? <Text style={styles.timelineNote}>{event.note}</Text> : null}
+                    {event.createdBy ? <Text style={styles.timelineBy}>by {event.createdBy}</Text> : null}
+                    <Text style={styles.timelineDate}>{formatDate(event.createdAt)} | {formatTime(event.createdAt)}</Text>
+                  </View>
+                </View>
+              ))}
+              {(issue.timeline?.length ?? 0) === 0 ? <Text style={styles.emptyText}>No timeline events yet</Text> : null}
+            </>
+          ) : (
+            <>
+              <View style={styles.divider} />
+              <Text style={styles.sectionTitle}>Worker Daily Updates</Text>
+              {(issue.workerReports ?? []).map((report) => (
+                <View key={report.id} style={styles.reportCard}>
+                  {report.imageUrl ? <Image source={{ uri: report.imageUrl }} style={styles.reportImage} resizeMode="cover" /> : null}
+                  <Text style={styles.reportTitle}>{report.workerName || "Worker"} | {getStatusLabel(report.status)}</Text>
+                  <Text style={styles.reportBody}>{report.note}</Text>
+                  <Text style={styles.reportMeta}>{report.imageVerificationSummary || "Image verification pending"}</Text>
+                  <Text style={styles.reportMeta}>{formatDate(report.createdAt)} | {formatTime(report.createdAt)}</Text>
+                </View>
+              ))}
+              {(issue.workerReports?.length ?? 0) === 0 ? <Text style={styles.emptyText}>No worker reports yet</Text> : null}
+            </>
+          )}
         </View>
       </ScrollView>
 
@@ -414,6 +474,36 @@ const styles = StyleSheet.create({
   assignedPillText: { color: Colors.success, fontSize: 12, fontWeight: "700" as const },
   buttonDisabled: { opacity: 0.45 },
   ruleText: { fontSize: 12, color: Colors.textSecondary, lineHeight: 18 },
+  detailToggleWrap: {
+    marginTop: 6,
+    flexDirection: "row",
+    alignSelf: "flex-start",
+    gap: 8,
+    borderRadius: 999,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 4,
+  },
+  detailToggleBtn: {
+    minWidth: 110,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  detailToggleBtnActive: {
+    backgroundColor: Colors.primary,
+  },
+  detailToggleText: {
+    fontSize: 13,
+    fontWeight: "800" as const,
+    color: Colors.textSecondary,
+  },
+  detailToggleTextActive: {
+    color: Colors.textInverse,
+  },
   upvoteBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 16, padding: 14, borderRadius: 14, borderWidth: 2, borderColor: Colors.primary },
   upvoteBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   upvoteText: { color: Colors.primary, fontSize: 16, fontWeight: "600" as const },
@@ -429,6 +519,7 @@ const styles = StyleSheet.create({
   timelineBy: { fontSize: 12, color: Colors.textTertiary, marginTop: 2 },
   timelineDate: { fontSize: 12, color: Colors.textTertiary, marginTop: 2 },
   reportCard: { marginBottom: 10, padding: 14, borderRadius: 16, backgroundColor: Colors.surface },
+  reportImage: { width: "100%", height: 200, borderRadius: 14, backgroundColor: Colors.borderLight, marginBottom: 10 },
   reportTitle: { fontSize: 14, fontWeight: "700" as const, color: Colors.text },
   reportBody: { fontSize: 14, color: Colors.textSecondary, marginTop: 6, lineHeight: 20 },
   reportMeta: { fontSize: 12, color: Colors.textTertiary, marginTop: 4 },

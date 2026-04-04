@@ -13,7 +13,7 @@ const statusFilterMap: Record<string, IssueStatus | undefined> = {
   All: undefined,
   Pending: "pending",
   "In Progress": "in_progress",
-  Resolved: "resolved",
+  Closed: "closed",
 };
 
 const priorityFilterMap: Record<string, IssuePriority | undefined> = {
@@ -23,7 +23,7 @@ const priorityFilterMap: Record<string, IssuePriority | undefined> = {
   Low: "low",
 };
 
-const statusOptions: IssueStatus[] = ["pending", "in_progress", "resolved"];
+const statusOptions = ["pending", "in_progress", "closed"] as const;
 type QueueView = "issues" | "resolved";
 
 export default function AdminDashboard() {
@@ -37,7 +37,7 @@ export default function AdminDashboard() {
     queryFn: adminApi.getStats,
   });
 
-  const statusParam = queueView === "resolved" ? "resolved" : statusFilterMap[statusFilter];
+  const statusParam = queueView === "resolved" ? undefined : statusFilterMap[statusFilter];
   const priorityParam = priorityFilterMap[priorityFilter];
 
   const { data, isLoading } = useQuery({
@@ -46,7 +46,7 @@ export default function AdminDashboard() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, status }: { id: number; status: IssueStatus }) =>
+    mutationFn: ({ id, status }: { id: number; status: (typeof statusOptions)[number] }) =>
       issuesApi.update(id, { status }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["issues"] });
@@ -93,7 +93,7 @@ export default function AdminDashboard() {
 
   const visibleIssues = useMemo(
     () =>
-      (data?.issues ?? []).filter((issue) => (queueView === "resolved" ? issue.status === "resolved" : issue.status !== "resolved")),
+      (data?.issues ?? []).filter((issue) => (queueView === "resolved" ? ["resolved", "closed"].includes(issue.status) : !["resolved", "closed"].includes(issue.status))),
     [data?.issues, queueView],
   );
 
@@ -202,13 +202,13 @@ export default function AdminDashboard() {
             {queueView === "issues" ? (
               <View style={styles.adminActions}>
                 {statusOptions.map((status) => {
-                  if (status === issue.status || status === "resolved" && issue.status === "resolved") return null;
+                  if (status === issue.status) return null;
 
                   const label = getStatusLabel(status);
                   const color = {
                     pending: Colors.statusPending,
                     in_progress: Colors.statusInProgress,
-                    resolved: Colors.statusResolved,
+                    closed: Colors.statusResolved,
                   }[status];
 
                   return (

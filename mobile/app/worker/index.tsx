@@ -115,6 +115,7 @@ export default function WorkerDashboardScreen() {
             {(data ?? []).map((issue) => {
               const assignmentState = issue.assignmentResponseStatus ?? "pending";
               const isAccepted = assignmentState === "accepted";
+              const isReadOnly = issue.status === "closed" || issue.status === "resolved";
               const isDecisionPending = assignmentDecisionMutation.isPending;
 
               return (
@@ -168,12 +169,18 @@ export default function WorkerDashboardScreen() {
                     </Pressable>
 
                     {isAccepted ? (
-                      <Pressable
-                        style={styles.primaryBtn}
-                        onPress={() => router.push(`/worker/report/${issue.id}` as never)}
-                      >
-                        <Text style={styles.primaryBtnText}>Send update</Text>
-                      </Pressable>
+                      isReadOnly ? (
+                        <Pressable style={styles.secondaryBtn} onPress={() => router.push(`/issue/${issue.id}`)}>
+                          <Text style={styles.secondaryBtnText}>View history</Text>
+                        </Pressable>
+                      ) : (
+                        <Pressable
+                          style={styles.primaryBtn}
+                          onPress={() => router.push(`/worker/report/${issue.id}` as never)}
+                        >
+                          <Text style={styles.primaryBtnText}>Send update</Text>
+                        </Pressable>
+                      )
                     ) : (
                       <>
                         <Pressable

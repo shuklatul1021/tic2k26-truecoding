@@ -106,7 +106,7 @@ export interface WorkerReport {
 
 export type IssueCategory = "garbage" | "pothole" | "water_leakage" | "other";
 export type IssuePriority = "high" | "medium" | "low";
-export type IssueStatus = "pending" | "in_progress" | "resolved";
+export type IssueStatus = "pending" | "in_progress" | "resolved" | "closed";
 export type ImageSource = "camera" | "gallery";
 
 export interface VerificationDetails {
@@ -155,7 +155,9 @@ export interface Issue {
   assignmentResponseStatus?: "pending" | "accepted" | "rejected";
   assignmentRespondedAt?: string | null;
   dueAt?: string | null;
+  resolutionVerifiedByUserAt?: string | null;
   resolvedAt?: string | null;
+  closedAt?: string | null;
   confidenceScore?: number | null;
   verificationStatus?: "pending" | "verified" | "rejected";
   verificationSummary?: string | null;
@@ -183,8 +185,10 @@ export interface IssueDetail extends Issue {
   timeline: TimelineEvent[];
   workerReports?: WorkerReport[];
   latestWorkerReportStatus?: string | null;
-  workerMarkedResolvedAt?: string | null;
-  canAdminMarkResolved?: boolean;
+  workerMarkedCompletedAt?: string | null;
+  reporterVerifiedResolution?: boolean;
+  canReporterVerifyResolution?: boolean;
+  canAdminCloseIssue?: boolean;
   inProgressLockedUntil?: string | null;
 }
 
@@ -318,6 +322,8 @@ export const issuesApi = {
       note?: string;
     },
   ) => api.patch<IssueDetail>(`/issues/${id}`, data),
+  verifyResolution: (id: number) =>
+    api.post<IssueDetail>(`/issues/${id}/verify-resolution`, {}),
   upvote: (id: number) =>
     api.post<{ upvotes: number; hasUpvoted: boolean }>(`/issues/${id}/upvote`, {}),
   getTimeline: (id: number) => api.get<TimelineEvent[]>(`/issues/${id}/timeline`),

@@ -72,5 +72,11 @@ export function getCategoryLabel(cat: string): string {
 }
 
 export function getStatusLabel(status: string): string {
-  return { pending: "Pending", in_progress: "In Progress", resolved: "Resolved" }[status] || status;
+  return {
+    pending: "Pending",
+    in_progress: "In Progress",
+    completed: "Completed",
+    resolved: "Resolved",
+    closed: "Closed",
+  }[status] || status;
 }
