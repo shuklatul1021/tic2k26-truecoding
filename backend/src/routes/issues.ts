@@ -13,7 +13,6 @@ import { logger } from "../lib/logger.js";
 
 const router = Router();
 const ADMIN_IN_PROGRESS_LOCK_DAYS = 3;
-const MIN_ASSIGNMENT_DURATION_MS = 24 * 60 * 60 * 1000;
 
 router.use(optionalAuth);
 
@@ -81,9 +80,9 @@ async function loadIssueDetail(issueId: number, currentUserId?: number | null) {
        reporter.name AS "userName",
        worker.name AS "assignedWorkerName",
        worker_profile.role_title AS "assignedWorkerRoleTitle",
-       COUNT(uv.id)::int AS upvotes,
+       COUNT(uv.id) FILTER (WHERE uv.user_id <> i.user_id)::int AS upvotes,
        CASE
-         WHEN $2::int IS NULL THEN false
+         WHEN $2::int IS NULL OR $2::int = i.user_id THEN false
          ELSE EXISTS(
            SELECT 1
            FROM upvotes uv2
@@ -194,7 +193,7 @@ router.get("/map", async (_req: AuthenticatedRequest, res) => {
          i.status,
          i.latitude,
          i.longitude,
-         COUNT(u.id)::int AS upvotes
+         COUNT(u.id) FILTER (WHERE u.user_id <> i.user_id)::int AS upvotes
        FROM issues i
        LEFT JOIN upvotes u ON u.issue_id = i.id
        WHERE i.verification_status = 'verified'
@@ -338,9 +337,9 @@ router.get("/", async (req: AuthenticatedRequest, res) => {
          ${distanceSql ? `${distanceSql} AS "distanceKm",` : `NULL::double precision AS "distanceKm",`}
          i.user_id AS "userId",
          reporter.name AS "userName",
-         COUNT(uv.id)::int AS upvotes,
+         COUNT(uv.id) FILTER (WHERE uv.user_id <> i.user_id)::int AS upvotes,
          CASE
-           WHEN $${currentUserParam}::int IS NULL THEN false
+           WHEN $${currentUserParam}::int IS NULL OR $${currentUserParam}::int = i.user_id THEN false
            ELSE EXISTS(
              SELECT 1
              FROM upvotes uv2
@@ -426,8 +425,6 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res) => {
     const {
       title,
       description,
-      category,
-      priority,
       imageUrl,
       latitude,
       longitude,
@@ -438,8 +435,6 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res) => {
     } = req.body as {
       title?: string;
       description?: string;
-      category?: string;
-      priority?: string;
       imageUrl?: string;
       latitude?: number;
       longitude?: number;
@@ -479,9 +474,6 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res) => {
       return;
     }
 
-    const finalCategory = category && isIssueCategory(category) ? category : verification.category;
-    const finalPriority = priority && isIssuePriority(priority) ? priority : verification.priority;
-
     const { rows } = await pool.query(
       `INSERT INTO issues (
          title,
@@ -514,8 +506,8 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res) => {
       [
         title.trim(),
         description.trim(),
-        finalCategory,
-        finalPriority,
+        verification.category,
+        verification.priority,
         imageUrl.trim(),
         latitude,
         longitude,
@@ -670,14 +662,10 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
       return;
     }
 
-    if (
-      nextAssignmentStartDate &&
-      nextDueDate &&
-      nextDueDate.getTime() - nextAssignmentStartDate.getTime() < MIN_ASSIGNMENT_DURATION_MS
-    ) {
+    if (nextAssignmentStartDate && nextDueDate && nextAssignmentStartDate.getTime() > nextDueDate.getTime()) {
       res.status(400).json({
         error: "BadRequest",
-        message: "Assignment end date must be later than the start date",
+        message: "Assignment start date cannot be after the end date",
       });
       return;
     }
@@ -881,6 +869,27 @@ router.post("/:id/upvote", requireAuth, async (req: AuthenticatedRequest, res) =
     const issueId = parseRouteId(req.params.id);
     if (!Number.isFinite(issueId)) {
       res.status(400).json({ error: "BadRequest", message: "Invalid issue id" });
+      return;
+    }
+
+    const issueResult = await pool.query(
+      "SELECT user_id AS \"userId\" FROM issues WHERE id = $1 LIMIT 1",
+      [issueId],
+    );
+
+    const issue = issueResult.rows[0] as { userId: number } | undefined;
+
+    if (!issue) {
+      res.status(404).json({ error: "NotFound", message: "Issue not found" });
+      return;
+    }
+
+    if (issue.userId === req.user!.userId) {
+      await pool.query("DELETE FROM upvotes WHERE issue_id = $1 AND user_id = $2", [
+        issueId,
+        req.user!.userId,
+      ]);
+      res.status(403).json({ error: "Forbidden", message: "You cannot upvote your own issue" });
       return;
     }
 

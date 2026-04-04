@@ -14,11 +14,32 @@ import {
 import * as Location from "expo-location";
 import { router } from "expo-router";
 import { Feather } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 import { getPostAuthRoute } from "@/lib/auth-routing";
 
+function buildAddress(address: Location.LocationGeocodedAddress | null | undefined) {
+  if (!address) {
+    return "";
+  }
+
+  const parts = [
+    address.name,
+    address.street,
+    address.district,
+    address.city,
+    address.subregion,
+    address.region,
+    address.postalCode,
+    address.country,
+  ].filter(Boolean);
+
+  return parts.join(", ");
+}
+
 export default function WorkerVerifyScreen() {
+  const insets = useSafeAreaInsets();
   const { user, verifyWorker, logout } = useAuth();
   const [name, setName] = useState(user?.name ?? "");
   const [roleTitle, setRoleTitle] = useState("");
@@ -53,9 +74,7 @@ export default function WorkerVerifyScreen() {
       });
 
       if (geo) {
-        setWorkAddress(
-          `${geo.street || ""}, ${geo.city || ""}, ${geo.region || ""}`.replace(/^, |, $/g, ""),
-        );
+        setWorkAddress(buildAddress(geo));
       }
     } catch {
       Alert.alert("Location failed", "Could not detect work location.");
@@ -103,8 +122,18 @@ export default function WorkerVerifyScreen() {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+    >
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 28 }]}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        automaticallyAdjustKeyboardInsets
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
           <View style={styles.logo}>
             <Feather name="tool" size={30} color={Colors.warning} />
@@ -134,9 +163,10 @@ export default function WorkerVerifyScreen() {
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Worker Role</Text>
+            <Text style={styles.helperText}>Example: Electrician, plumber, sanitation worker</Text>
             <TextInput
               style={styles.input}
-              placeholder="Example: Electrician, Plumber, Sanitation Worker"
+              placeholder="Enter your worker role"
               placeholderTextColor={Colors.placeholder}
               value={roleTitle}
               onChangeText={setRoleTitle}
@@ -157,20 +187,24 @@ export default function WorkerVerifyScreen() {
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Work Address</Text>
             <TextInput
-              style={styles.input}
-              placeholder="Primary service area"
+              style={[styles.input, styles.addressInput]}
+              placeholder="Primary service area or full work address"
               placeholderTextColor={Colors.placeholder}
               value={workAddress}
               onChangeText={setWorkAddress}
+              multiline
+              textAlignVertical="top"
             />
           </View>
 
           <Pressable style={styles.locationBtn} onPress={detectLocation}>
             <Feather name="map-pin" size={18} color={Colors.warning} />
             <Text style={styles.locationText}>
-              {workLatitude && workLongitude
-                ? `${workLatitude.toFixed(4)}, ${workLongitude.toFixed(4)}`
-                : "Use my current location"}
+              {workAddress.trim()
+                ? workAddress
+                : workLatitude && workLongitude
+                  ? `${workLatitude.toFixed(5)}, ${workLongitude.toFixed(5)}`
+                  : "Use my current address"}
             </Text>
           </Pressable>
 
@@ -218,7 +252,7 @@ export default function WorkerVerifyScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  scroll: { flexGrow: 1, padding: 24, gap: 20 },
+  scroll: { flexGrow: 1, paddingHorizontal: 24, gap: 20 },
   header: { alignItems: "center", gap: 10, marginTop: 12 },
   logo: {
     width: 72,
@@ -244,6 +278,7 @@ const styles = StyleSheet.create({
   accountPillText: { color: Colors.warning, fontWeight: "700" as const },
   inputGroup: { gap: 6 },
   label: { fontSize: 14, fontWeight: "600" as const, color: Colors.text },
+  helperText: { fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
   input: {
     height: 50,
     borderRadius: 12,
@@ -251,17 +286,26 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     backgroundColor: Colors.background,
     paddingHorizontal: 14,
+    paddingVertical: 0,
+    fontSize: 16,
     color: Colors.text,
+    textAlignVertical: "center",
+  },
+  addressInput: {
+    minHeight: 86,
+    height: 86,
+    paddingTop: 13,
+    paddingBottom: 13,
   },
   locationBtn: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 8,
     padding: 14,
     borderRadius: 12,
     backgroundColor: Colors.warningLight,
   },
-  locationText: { color: Colors.warning, fontWeight: "600" as const, flex: 1 },
+  locationText: { color: Colors.warning, fontWeight: "600" as const, flex: 1, lineHeight: 20 },
   passwordInput: {
     height: 50,
     borderRadius: 12,
@@ -273,7 +317,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
-  passwordField: { flex: 1, color: Colors.text, fontSize: 16 },
+  passwordField: { flex: 1, color: Colors.text, fontSize: 16, paddingVertical: 0 },
   primaryButton: {
     height: 52,
     borderRadius: 14,

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
@@ -7,6 +7,8 @@ interface DateCalendarModalProps {
   visible: boolean;
   title: string;
   value?: string;
+  minValue?: string;
+  maxValue?: string;
   onClose: () => void;
   onSelect: (value: string) => void;
   onClear?: () => void;
@@ -39,11 +41,23 @@ export function DateCalendarModal({
   visible,
   title,
   value,
+  minValue,
+  maxValue,
   onClose,
   onSelect,
   onClear,
 }: DateCalendarModalProps) {
   const [monthCursor, setMonthCursor] = useState(() => fromDateValue(value) ?? new Date());
+  const minDate = useMemo(() => fromDateValue(minValue), [minValue]);
+  const maxDate = useMemo(() => fromDateValue(maxValue), [maxValue]);
+
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+
+    setMonthCursor(fromDateValue(value) ?? minDate ?? maxDate ?? new Date());
+  }, [visible, value, minDate, maxDate]);
 
   const selectedValue = value ?? "";
   const monthLabel = monthCursor.toLocaleDateString("en-US", {
@@ -56,7 +70,7 @@ export function DateCalendarModal({
     const month = monthCursor.getMonth();
     const firstDayOfMonth = new Date(year, month, 1);
     const lastDayOfMonth = new Date(year, month + 1, 0);
-    const days: Array<{ key: string; label: string; value?: string; inMonth: boolean }> = [];
+    const days: Array<{ key: string; label: string; value?: string; inMonth: boolean; disabled?: boolean }> = [];
 
     for (let i = 0; i < firstDayOfMonth.getDay(); i += 1) {
       days.push({ key: `blank-${i}`, label: "", inMonth: false });
@@ -64,16 +78,22 @@ export function DateCalendarModal({
 
     for (let day = 1; day <= lastDayOfMonth.getDate(); day += 1) {
       const current = new Date(year, month, day);
+      const isDisabled =
+        Boolean(
+          (minDate && current.getTime() < minDate.getTime()) ||
+          (maxDate && current.getTime() > maxDate.getTime()),
+        );
       days.push({
         key: toDateValue(current),
         label: String(day),
         value: toDateValue(current),
         inMonth: true,
+        disabled: isDisabled,
       });
     }
 
     return days;
-  }, [monthCursor]);
+  }, [maxDate, minDate, monthCursor]);
 
   function openPreviousMonth() {
     setMonthCursor((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1));
@@ -126,11 +146,16 @@ export function DateCalendarModal({
               return (
                 <Pressable
                   key={day.key}
-                  style={[styles.dayCell, isSelected && styles.dayCellSelected, !day.inMonth && styles.dayCellBlank]}
-                  disabled={!day.value}
+                  style={[
+                    styles.dayCell,
+                    isSelected && styles.dayCellSelected,
+                    !day.inMonth && styles.dayCellBlank,
+                    day.disabled && styles.dayCellDisabled,
+                  ]}
+                  disabled={!day.value || day.disabled}
                   onPress={() => day.value && handleSelect(day.value)}
                 >
-                  <Text style={[styles.dayText, isSelected && styles.dayTextSelected]}>
+                  <Text style={[styles.dayText, isSelected && styles.dayTextSelected, day.disabled && styles.dayTextDisabled]}>
                     {day.label}
                   </Text>
                 </Pressable>
@@ -239,6 +264,10 @@ const styles = StyleSheet.create({
   dayCellBlank: {
     backgroundColor: "transparent",
   },
+  dayCellDisabled: {
+    backgroundColor: Colors.borderLight,
+    opacity: 0.45,
+  },
   dayText: {
     fontSize: 13,
     fontWeight: "700" as const,
@@ -246,6 +275,9 @@ const styles = StyleSheet.create({
   },
   dayTextSelected: {
     color: Colors.textInverse,
+  },
+  dayTextDisabled: {
+    color: Colors.textTertiary,
   },
   footer: {
     flexDirection: "row",

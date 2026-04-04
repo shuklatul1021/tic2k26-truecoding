@@ -104,8 +104,11 @@ export default function WorkerLayout() {
   if (!user.workerVerified || !user.onboardingCompleted) {
     return (
       <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="profile" />
         <Stack.Screen name="verify" />
         <Stack.Screen name="onboarding" />
+        <Stack.Screen name="report/[id]" />
       </Stack>
     );
   }

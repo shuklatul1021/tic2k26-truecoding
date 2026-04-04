@@ -295,8 +295,6 @@ export const issuesApi = {
   create: (data: {
     title: string;
     description: string;
-    category?: string;
-    priority?: string;
     imageUrl: string;
     latitude: number;
     longitude: number;

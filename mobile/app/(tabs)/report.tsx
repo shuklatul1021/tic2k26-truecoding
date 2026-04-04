@@ -16,25 +16,10 @@ import LocationPickerMap from "@/components/LocationPickerMap";
 import {
   issuesApi,
   uploadApi,
-  type IssueCategory,
-  type IssuePriority,
   type VerificationDetails,
   type ImageSource,
 } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-
-const CATEGORIES = [
-  { value: "garbage" as IssueCategory, label: "Garbage", icon: "trash-2" },
-  { value: "pothole" as IssueCategory, label: "Pothole", icon: "alert-triangle" },
-  { value: "water_leakage" as IssueCategory, label: "Water Leakage", icon: "droplet" },
-  { value: "other" as IssueCategory, label: "Other", icon: "help-circle" },
-];
-
-const PRIORITIES = [
-  { value: "high" as IssuePriority, label: "High", color: Colors.priorityHigh, bg: Colors.priorityHighBg },
-  { value: "medium" as IssuePriority, label: "Medium", color: Colors.priorityMedium, bg: Colors.priorityMediumBg },
-  { value: "low" as IssuePriority, label: "Low", color: Colors.priorityLow, bg: Colors.priorityLowBg },
-];
 
 type ReportLocation = {
   lat: number;
@@ -100,8 +85,6 @@ export default function ReportScreen() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState<IssueCategory>("garbage");
-  const [priority, setPriority] = useState<IssuePriority>("medium");
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [location, setLocation] = useState<ReportLocation | null>(null);
@@ -121,8 +104,6 @@ export default function ReportScreen() {
       issuesApi.create({
         title,
         description,
-        category,
-        priority,
         imageUrl: imageUrl!,
         latitude: location!.lat,
         longitude: location!.lng,
@@ -182,8 +163,6 @@ export default function ReportScreen() {
   function resetForm() {
     setTitle("");
     setDescription("");
-    setCategory("garbage");
-    setPriority("medium");
     setImageUri(null);
     setImageUrl(null);
     setLocation(null);
@@ -276,8 +255,6 @@ export default function ReportScreen() {
       setImageUrl(uploadResult.imageUrl);
       setImageVerification(verification);
       setImageError(null);
-      setCategory(verification.category);
-      setPriority(verification.priority);
       if (!title.trim()) {
         setTitle(buildSuggestedTitle(verification));
       }
@@ -475,33 +452,23 @@ export default function ReportScreen() {
         ) : null}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Category</Text>
+          <Text style={styles.sectionTitle}>AI Classification</Text>
+          <Text style={styles.sectionHelper}>
+            Category and priority are locked from the verified Gemini result and cannot be changed manually.
+          </Text>
           <View style={styles.grid}>
-            {CATEGORIES.map((cat) => (
-              <Pressable
-                key={cat.value}
-                style={[styles.catChip, category === cat.value && styles.catChipActive]}
-                onPress={() => setCategory(cat.value)}
-              >
-                <Feather name={cat.icon as any} size={18} color={category === cat.value ? Colors.primary : Colors.textSecondary} />
-                <Text style={[styles.catText, category === cat.value && styles.catTextActive]}>{cat.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Priority</Text>
-          <View style={styles.priorityRow}>
-            {PRIORITIES.map((p) => (
-              <Pressable
-                key={p.value}
-                style={[styles.prioChip, priority === p.value && { backgroundColor: p.bg, borderColor: p.color }]}
-                onPress={() => setPriority(p.value)}
-              >
-                <Text style={[styles.prioText, priority === p.value && { color: p.color }]}>{p.label}</Text>
-              </Pressable>
-            ))}
+            <View style={styles.lockedChip}>
+              <Feather name="tag" size={16} color={Colors.primary} />
+              <Text style={styles.lockedChipText}>
+                Category: {imageVerification ? imageVerification.category.replace(/_/g, " ") : "Waiting for image verification"}
+              </Text>
+            </View>
+            <View style={styles.lockedChip}>
+              <Feather name="flag" size={16} color={Colors.primary} />
+              <Text style={styles.lockedChipText}>
+                Priority: {imageVerification ? imageVerification.priority : "Waiting for image verification"}
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -715,19 +682,18 @@ const styles = StyleSheet.create({
   verificationNoteLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: "700" as const, textTransform: "uppercase" },
   verificationNote: { fontSize: 13, lineHeight: 18, color: Colors.text },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  catChip: {
-    flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10,
-    borderRadius: 12, backgroundColor: Colors.surface, borderWidth: 1.5, borderColor: Colors.border,
+  lockedChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 12,
+    backgroundColor: Colors.primaryLight,
+    borderWidth: 1,
+    borderColor: "#BDD5F7",
   },
-  catChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
-  catText: { fontSize: 14, color: Colors.textSecondary, fontWeight: "500" as const },
-  catTextActive: { color: Colors.primary },
-  priorityRow: { flexDirection: "row", gap: 10 },
-  prioChip: {
-    flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: "center",
-    backgroundColor: Colors.surface, borderWidth: 1.5, borderColor: Colors.border,
-  },
-  prioText: { fontSize: 14, fontWeight: "600" as const, color: Colors.textSecondary },
+  lockedChipText: { fontSize: 14, color: Colors.primaryDark, fontWeight: "700" as const },
   textInput: {
     borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12, padding: 14,
     fontSize: 16, color: Colors.text, backgroundColor: Colors.surface,

@@ -13,29 +13,19 @@ import { Feather } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { AdminPageFrame } from "@/components/admin/AdminPageFrame";
 import { adminApi, type WorkerAccount } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
 
 function getWorkerStatus(worker: WorkerAccount) {
   if (!worker.workerVerified) {
     return {
-      label: "Pending verification",
+      label: "Not verified",
       color: Colors.warning,
       backgroundColor: Colors.warningLight,
       icon: "clock",
     };
   }
 
-  if (!worker.onboardingCompleted) {
-    return {
-      label: "Onboarding pending",
-      color: Colors.primary,
-      backgroundColor: Colors.primaryLight,
-      icon: "tool",
-    };
-  }
-
   return {
-    label: "Ready for assignments",
+    label: "Verified",
     color: Colors.success,
     backgroundColor: Colors.successLight,
     icon: "check-circle",
@@ -184,7 +174,7 @@ export default function AdminWorkersScreen() {
         <View style={styles.panelHeaderRow}>
           <View>
             <Text style={styles.panelTitle}>Worker accounts</Text>
-            <Text style={styles.panelSubtitle}>Review verification and onboarding progress for every worker account.</Text>
+            <Text style={styles.panelSubtitle}>Review worker name, email, and verification status.</Text>
           </View>
           <View style={styles.countBadge}>
             <Text style={styles.countBadgeText}>{workers?.length ?? 0}</Text>
@@ -218,29 +208,6 @@ export default function AdminWorkersScreen() {
                       <Text style={[styles.statusPillText, { color: status.color }]}>{status.label}</Text>
                     </View>
                   </View>
-
-                  <View style={styles.workerMetaGrid}>
-                    <View style={styles.workerMetaItem}>
-                      <Text style={styles.workerMetaLabel}>Role</Text>
-                      <Text style={styles.workerMetaValue}>{worker.roleTitle || "Not set yet"}</Text>
-                    </View>
-                    <View style={styles.workerMetaItem}>
-                      <Text style={styles.workerMetaLabel}>Created</Text>
-                      <Text style={styles.workerMetaValue}>{formatDate(worker.createdAt)}</Text>
-                    </View>
-                    <View style={styles.workerMetaItem}>
-                      <Text style={styles.workerMetaLabel}>Verification</Text>
-                      <Text style={styles.workerMetaValue}>{worker.workerVerified ? "Complete" : "Pending"}</Text>
-                    </View>
-                    <View style={styles.workerMetaItem}>
-                      <Text style={styles.workerMetaLabel}>Onboarding</Text>
-                      <Text style={styles.workerMetaValue}>{worker.onboardingCompleted ? "Complete" : "Pending"}</Text>
-                    </View>
-                  </View>
-
-                  {worker.invitedByAdminName ? (
-                    <Text style={styles.workerFooter}>Created by {worker.invitedByAdminName}</Text>
-                  ) : null}
                 </View>
               );
             })}
@@ -403,10 +370,14 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   workerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: 12,
   },
   workerIdentity: {
     gap: 4,
+    flex: 1,
   },
   workerName: {
     fontSize: 16,
@@ -429,36 +400,5 @@ const styles = StyleSheet.create({
   statusPillText: {
     fontSize: 12,
     fontWeight: "800" as const,
-  },
-  workerMetaGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  workerMetaItem: {
-    flexGrow: 1,
-    flexBasis: 130,
-    borderRadius: 12,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 9,
-    gap: 4,
-  },
-  workerMetaLabel: {
-    fontSize: 12,
-    color: Colors.textTertiary,
-    fontWeight: "700" as const,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  },
-  workerMetaValue: {
-    fontSize: 14,
-    color: Colors.text,
-    fontWeight: "700" as const,
-  },
-  workerFooter: {
-    fontSize: 13,
-    color: Colors.textSecondary,
   },
 });

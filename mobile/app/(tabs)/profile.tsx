@@ -142,16 +142,16 @@ export default function ProfileScreen() {
       <View style={styles.walletCard}>
         <View style={styles.walletHeader}>
           <View>
-            <Text style={styles.walletLabel}>Reward Wallet</Text>
-            <Text style={styles.walletValue}>Rs {Number(user.walletBalance ?? 0).toFixed(2)}</Text>
+            <Text style={styles.walletLabel}>Reward Points</Text>
+            <Text style={styles.walletValue}>{user.pointsBalance ?? 0} pts</Text>
           </View>
           <View style={styles.walletChip}>
-            <Feather name="credit-card" size={16} color={Colors.warning} />
-            <Text style={styles.walletChipText}>{user.pointsBalance ?? 0} pts</Text>
+            <Feather name="award" size={16} color={Colors.warning} />
+            <Text style={styles.walletChipText}>Verified rewards</Text>
           </View>
         </View>
         <Text style={styles.walletNote}>
-          Rewards are credited after verification and successful resolution of the issues you report.
+          Points are credited after verification and successful resolution of the issues you report.
         </Text>
       </View>
 

@@ -128,22 +128,24 @@ export function IssueCard({ issue, onPress, onUpvote }: Props) {
               <Text style={styles.metaPillText}>{issue.upvotes} upvotes</Text>
             </View>
           </View>
-          <Pressable
-            style={[styles.upvoteBtn, issue.hasUpvoted && styles.upvoteBtnActive]}
-            onPress={(event) => {
-              event.stopPropagation();
-              onUpvote?.();
-            }}
-          >
-            <Ionicons
-              name={issue.hasUpvoted ? "arrow-up-circle" : "arrow-up-circle-outline"}
-              size={18}
-              color={issue.hasUpvoted ? Colors.primary : Colors.textSecondary}
-            />
-            <Text style={[styles.upvoteText, issue.hasUpvoted && styles.upvoteTextActive]}>
-              Support
-            </Text>
-          </Pressable>
+          {onUpvote ? (
+            <Pressable
+              style={[styles.upvoteBtn, issue.hasUpvoted && styles.upvoteBtnActive]}
+              onPress={(event) => {
+                event.stopPropagation();
+                onUpvote();
+              }}
+            >
+              <Ionicons
+                name={issue.hasUpvoted ? "arrow-up-circle" : "arrow-up-circle-outline"}
+                size={18}
+                color={issue.hasUpvoted ? Colors.primary : Colors.textSecondary}
+              />
+              <Text style={[styles.upvoteText, issue.hasUpvoted && styles.upvoteTextActive]}>
+                Support
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
     </Pressable>

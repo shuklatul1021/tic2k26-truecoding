@@ -146,10 +146,11 @@ export default function IssueDetailScreen() {
   const originalEndDate = extractDateValue(issue.dueAt);
   const hasScheduleChanges = assignmentStartDate !== originalStartDate || assignmentEndDate !== originalEndDate;
   const hasCompleteSchedule = Boolean(assignmentStartDate && assignmentEndDate);
-  const hasValidScheduleRange = hasCompleteSchedule && assignmentEndDate > assignmentStartDate;
+  const hasValidScheduleRange = hasCompleteSchedule && assignmentEndDate >= assignmentStartDate;
   const isInProgressLocked = Boolean(issue.inProgressLockedUntil && new Date(issue.inProgressLockedUntil).getTime() > Date.now());
   const canAssignWorker = hasValidScheduleRange;
   const canSaveSchedule = Boolean(issue.assignedWorkerId && hasValidScheduleRange && hasScheduleChanges);
+  const canShowUpvote = !user || (user.role === "user" && user.id !== issue.userId);
 
   function validateSchedule() {
     if (!hasCompleteSchedule) {
@@ -157,7 +158,7 @@ export default function IssueDetailScreen() {
       return false;
     }
     if (!hasValidScheduleRange) {
-      Alert.alert("Invalid dates", "End date must be later than the start date.");
+      Alert.alert("Invalid dates", "Start date cannot be after the end date.");
       return false;
     }
     return true;
@@ -298,11 +299,11 @@ export default function IssueDetailScreen() {
                 );
               })}
               {!hasCompleteSchedule ? <Text style={styles.ruleText}>Pick both dates before assigning a worker.</Text> : null}
-              {hasCompleteSchedule && !hasValidScheduleRange ? <Text style={styles.ruleText}>End date must be later than the start date.</Text> : null}
+              {hasCompleteSchedule && !hasValidScheduleRange ? <Text style={styles.ruleText}>Start date cannot be after the end date.</Text> : null}
             </View>
           ) : null}
 
-          {user?.role !== "admin" ? (
+          {canShowUpvote ? (
             <Pressable style={[styles.upvoteBtn, issue.hasUpvoted && styles.upvoteBtnActive]} onPress={() => (user ? upvoteMutation.mutate() : router.push("/auth/login"))} disabled={upvoteMutation.isPending}>
               <Ionicons name={issue.hasUpvoted ? "arrow-up-circle" : "arrow-up-circle-outline"} size={22} color={issue.hasUpvoted ? "#fff" : Colors.primary} />
               <Text style={[styles.upvoteText, issue.hasUpvoted && { color: "#fff" }]}>{issue.upvotes} {issue.upvotes === 1 ? "upvote" : "upvotes"}</Text>
@@ -345,6 +346,7 @@ export default function IssueDetailScreen() {
         visible={pickerTarget === "start"}
         title="Select Start Date"
         value={assignmentStartDate}
+        maxValue={assignmentEndDate || undefined}
         onClose={() => setPickerTarget(null)}
         onSelect={setAssignmentStartDate}
         onClear={() => { setAssignmentStartDate(""); setPickerTarget(null); }}
@@ -353,6 +355,7 @@ export default function IssueDetailScreen() {
         visible={pickerTarget === "end"}
         title="Select End Date"
         value={assignmentEndDate}
+        minValue={assignmentStartDate || undefined}
         onClose={() => setPickerTarget(null)}
         onSelect={setAssignmentEndDate}
         onClear={() => { setAssignmentEndDate(""); setPickerTarget(null); }}

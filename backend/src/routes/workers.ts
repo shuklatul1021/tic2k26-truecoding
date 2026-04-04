@@ -205,7 +205,7 @@ router.get("/me/assignments", requireAuth, async (req: AuthenticatedRequest, res
            i.created_at AS "createdAt",
            i.updated_at AS "updatedAt",
            u.name AS "userName",
-           COUNT(uv.id)::int AS upvotes
+           COUNT(uv.id) FILTER (WHERE uv.user_id <> i.user_id)::int AS upvotes
          FROM issues i
          INNER JOIN users u ON u.id = i.user_id
          LEFT JOIN upvotes uv ON uv.issue_id = i.id

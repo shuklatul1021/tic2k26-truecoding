@@ -43,12 +43,15 @@ router.get("/:id/issues", requireAuth, async (req: AuthenticatedRequest, res) =>
          i.created_at AS "createdAt",
          i.updated_at AS "updatedAt",
          u.name AS "userName",
-         COUNT(uv.id)::int AS upvotes,
-         EXISTS(
+         COUNT(uv.id) FILTER (WHERE uv.user_id <> i.user_id)::int AS upvotes,
+         CASE
+           WHEN $2::int = i.user_id THEN false
+           ELSE EXISTS(
            SELECT 1
            FROM upvotes uv2
            WHERE uv2.issue_id = i.id AND uv2.user_id = $2
-         ) AS "hasUpvoted"
+           )
+         END AS "hasUpvoted"
        FROM issues i
        INNER JOIN users u ON u.id = i.user_id
        LEFT JOIN upvotes uv ON uv.issue_id = i.id

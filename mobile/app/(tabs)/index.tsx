@@ -295,7 +295,7 @@ export default function HomeScreen() {
     <IssueCard
       issue={item}
       onPress={() => router.push(`/issue/${item.id}`)}
-      onUpvote={() => user ? upvoteMutation.mutate(item.id) : router.push("/auth/login")}
+      onUpvote={user?.id === item.userId ? undefined : () => user ? upvoteMutation.mutate(item.id) : router.push("/auth/login")}
     />
   );
 
