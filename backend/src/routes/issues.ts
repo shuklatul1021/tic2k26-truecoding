@@ -12,12 +12,27 @@ import type { AuthenticatedRequest } from "../types/auth.js";
 import { logger } from "../lib/logger.js";
 
 const router = Router();
+const ADMIN_IN_PROGRESS_LOCK_DAYS = 3;
+const MIN_ASSIGNMENT_DURATION_MS = 24 * 60 * 60 * 1000;
 
 router.use(optionalAuth);
 
 function parseRouteId(value: string | string[] | undefined): number {
   const rawValue = Array.isArray(value) ? value[0] : value;
   return Number.parseInt(rawValue || "", 10);
+}
+
+function parseOptionalDate(value?: string | null): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function addDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
 async function loadIssueDetail(issueId: number, currentUserId?: number | null) {
@@ -36,6 +51,7 @@ async function loadIssueDetail(issueId: number, currentUserId?: number | null) {
        i.address,
        i.assigned_to AS "assignedTo",
        i.assigned_worker_id AS "assignedWorkerId",
+       i.assignment_start_at AS "assignmentStartAt",
        i.due_at AS "dueAt",
        i.resolved_at AS "resolvedAt",
        i.verification_status AS "verificationStatus",
@@ -62,6 +78,7 @@ async function loadIssueDetail(issueId: number, currentUserId?: number | null) {
        i.updated_at AS "updatedAt",
        reporter.name AS "userName",
        worker.name AS "assignedWorkerName",
+       worker_profile.role_title AS "assignedWorkerRoleTitle",
        COUNT(uv.id)::int AS upvotes,
        CASE
          WHEN $2::int IS NULL THEN false
@@ -74,9 +91,10 @@ async function loadIssueDetail(issueId: number, currentUserId?: number | null) {
      FROM issues i
      INNER JOIN users reporter ON reporter.id = i.user_id
      LEFT JOIN users worker ON worker.id = i.assigned_worker_id
+     LEFT JOIN worker_profiles worker_profile ON worker_profile.user_id = i.assigned_worker_id
      LEFT JOIN upvotes uv ON uv.issue_id = i.id
      WHERE i.id = $1
-     GROUP BY i.id, reporter.name, worker.name`,
+     GROUP BY i.id, reporter.name, worker.name, worker_profile.role_title`,
     [issueId, currentUserId ?? null],
   );
 
@@ -118,10 +136,48 @@ async function loadIssueDetail(issueId: number, currentUserId?: number | null) {
     [issueId],
   );
 
+  const latestAdminInProgressResult = await pool.query(
+    `SELECT created_at AS "createdAt"
+     FROM timeline_events
+     WHERE issue_id = $1
+       AND status = 'in_progress'
+       AND note IN ('Admin marked issue in progress', 'Admin refreshed in-progress status')
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [issueId],
+  );
+
+  const latestAssignedWorkerReportResult = issue.assignedWorkerId
+    ? await pool.query(
+        `SELECT
+           status,
+           created_at AS "createdAt"
+         FROM worker_reports
+         WHERE issue_id = $1
+           AND worker_id = $2
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [issueId, issue.assignedWorkerId],
+      )
+    : { rows: [] as Array<{ status: string; createdAt: string }> };
+
+  const latestAdminInProgressAt = latestAdminInProgressResult.rows[0]?.createdAt
+    ? new Date(latestAdminInProgressResult.rows[0].createdAt)
+    : null;
+  const inProgressLockedUntil = latestAdminInProgressAt
+    ? addDays(latestAdminInProgressAt, ADMIN_IN_PROGRESS_LOCK_DAYS)
+    : null;
+  const latestWorkerReport = latestAssignedWorkerReportResult.rows[0];
+  const workerMarkedResolved = latestWorkerReport?.status === "resolved";
+
   return {
     ...issue,
     timeline: timelineResult.rows,
     workerReports: reportsResult.rows,
+    latestWorkerReportStatus: latestWorkerReport?.status ?? null,
+    workerMarkedResolvedAt: workerMarkedResolved ? latestWorkerReport.createdAt : null,
+    canAdminMarkResolved: Boolean(issue.assignedWorkerId && workerMarkedResolved),
+    inProgressLockedUntil: inProgressLockedUntil?.toISOString() ?? null,
   };
 }
 
@@ -529,6 +585,7 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
       priority,
       assignedTo,
       assignedWorkerId,
+      assignmentStartAt,
       dueAt,
       resolvedImageUrl,
       note,
@@ -537,6 +594,7 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
       priority?: string;
       assignedTo?: string | null;
       assignedWorkerId?: number | null;
+      assignmentStartAt?: string | null;
       dueAt?: string | null;
       resolvedImageUrl?: string | null;
       note?: string;
@@ -552,8 +610,24 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
       return;
     }
 
+    if (assignmentStartAt && !parseOptionalDate(assignmentStartAt)) {
+      res.status(400).json({ error: "BadRequest", message: "Invalid assignment start date" });
+      return;
+    }
+
+    if (dueAt && !parseOptionalDate(dueAt)) {
+      res.status(400).json({ error: "BadRequest", message: "Invalid assignment end date" });
+      return;
+    }
+
     const currentIssueResult = await pool.query(
-      `SELECT id, status, user_id AS "userId", assigned_worker_id AS "assignedWorkerId", due_at AS "dueAt"
+      `SELECT
+         id,
+         status,
+         user_id AS "userId",
+         assigned_worker_id AS "assignedWorkerId",
+         assignment_start_at AS "assignmentStartAt",
+         due_at AS "dueAt"
        FROM issues
        WHERE id = $1
        LIMIT 1`,
@@ -561,12 +635,123 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
     );
 
     const currentIssue = currentIssueResult.rows[0] as
-      | { id: number; status: string; userId: number; assignedWorkerId: number | null; dueAt: string | null }
+      | {
+          id: number;
+          status: string;
+          userId: number;
+          assignedWorkerId: number | null;
+          assignmentStartAt: string | null;
+          dueAt: string | null;
+        }
       | undefined;
 
     if (!currentIssue) {
       res.status(404).json({ error: "NotFound", message: "Issue not found" });
       return;
+    }
+
+    const nextAssignedWorkerId =
+      assignedWorkerId !== undefined ? assignedWorkerId : currentIssue.assignedWorkerId;
+    const nextAssignmentStartAt =
+      assignmentStartAt !== undefined ? assignmentStartAt : currentIssue.assignmentStartAt;
+    const nextDueAt = dueAt !== undefined ? dueAt : currentIssue.dueAt;
+
+    const nextAssignmentStartDate = parseOptionalDate(nextAssignmentStartAt);
+    const nextDueDate = parseOptionalDate(nextDueAt);
+
+    if ((assignmentStartAt !== undefined || dueAt !== undefined) && (!nextAssignmentStartDate || !nextDueDate)) {
+      res.status(400).json({ error: "BadRequest", message: "Assignment start date and end date are both required" });
+      return;
+    }
+
+    if (
+      nextAssignmentStartDate &&
+      nextDueDate &&
+      nextDueDate.getTime() - nextAssignmentStartDate.getTime() < MIN_ASSIGNMENT_DURATION_MS
+    ) {
+      res.status(400).json({
+        error: "BadRequest",
+        message: "Assignment end date must be later than the start date",
+      });
+      return;
+    }
+
+    if (assignedWorkerId && !currentIssue.assignedWorkerId && (!nextAssignmentStartDate || !nextDueDate)) {
+      res.status(400).json({ error: "BadRequest", message: "Select both start and end dates before assigning a worker" });
+      return;
+    }
+
+    if (
+      assignedWorkerId &&
+      currentIssue.assignedWorkerId &&
+      currentIssue.assignedWorkerId !== assignedWorkerId
+    ) {
+      res.status(409).json({
+        error: "Conflict",
+        message: "A worker is already assigned to this issue. Reassignment is not allowed.",
+      });
+      return;
+    }
+
+    if (status === "in_progress" && currentIssue.status === "in_progress") {
+      const latestAdminInProgressResult = await pool.query(
+        `SELECT created_at AS "createdAt"
+         FROM timeline_events
+         WHERE issue_id = $1
+           AND status = 'in_progress'
+           AND note IN ('Admin marked issue in progress', 'Admin refreshed in-progress status')
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [issueId],
+      );
+
+      const latestAdminInProgressAt = latestAdminInProgressResult.rows[0]?.createdAt
+        ? new Date(latestAdminInProgressResult.rows[0].createdAt)
+        : null;
+
+      if (latestAdminInProgressAt) {
+        const lockedUntil = addDays(latestAdminInProgressAt, ADMIN_IN_PROGRESS_LOCK_DAYS);
+        if (lockedUntil.getTime() > Date.now()) {
+          res.status(409).json({
+            error: "Conflict",
+            message: `Issue already marked in progress. Try again after ${lockedUntil.toISOString()}.`,
+          });
+          return;
+        }
+      }
+    }
+
+    if (status === "resolved") {
+      if (currentIssue.status === "resolved") {
+        res.status(409).json({ error: "Conflict", message: "Issue is already resolved." });
+        return;
+      }
+
+      if (!nextAssignedWorkerId) {
+        res.status(409).json({
+          error: "Conflict",
+          message: "Assign a worker before marking this issue as resolved.",
+        });
+        return;
+      }
+
+      const latestWorkerReportResult = await pool.query(
+        `SELECT status
+         FROM worker_reports
+         WHERE issue_id = $1
+           AND worker_id = $2
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [issueId, nextAssignedWorkerId],
+      );
+
+      if (latestWorkerReportResult.rows[0]?.status !== "resolved") {
+        res.status(409).json({
+          error: "Conflict",
+          message: "Admin can mark this issue resolved only after the assigned worker submits a resolved update.",
+        });
+        return;
+      }
     }
 
     const updates: string[] = ["updated_at = NOW()"];
@@ -591,6 +776,10 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
       values.push(assignedWorkerId ?? null);
       updates.push(`assigned_worker_id = $${values.length}`);
     }
+    if (assignmentStartAt !== undefined) {
+      values.push(assignmentStartAt || null);
+      updates.push(`assignment_start_at = $${values.length}`);
+    }
     if (dueAt !== undefined) {
       values.push(dueAt || null);
       updates.push(`due_at = $${values.length}`);
@@ -610,24 +799,46 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
       values,
     );
 
-    if (assignedWorkerId) {
+    const isNewAssignment =
+      assignedWorkerId !== undefined &&
+      assignedWorkerId !== null &&
+      currentIssue.assignedWorkerId !== assignedWorkerId;
+    const isStatusChange = Boolean(status);
+
+    if (isNewAssignment && assignedWorkerId) {
       const workerNameResult = await pool.query("SELECT name FROM users WHERE id = $1", [assignedWorkerId]);
       const workerName = workerNameResult.rows[0]?.name || "Worker";
+      const scheduleSummary = [
+        nextAssignmentStartAt ? `start ${new Date(nextAssignmentStartAt).toLocaleDateString("en-US")}` : null,
+        nextDueAt ? `end ${new Date(nextDueAt).toLocaleDateString("en-US")}` : null,
+      ]
+        .filter(Boolean)
+        .join(" | ");
+
       await pool.query(
         `INSERT INTO timeline_events (issue_id, status, note, created_by)
          VALUES ($1, $2, $3, $4)`,
         [
           issueId,
           status || currentIssue.status,
-          note?.trim() || `Assigned to ${workerName}${dueAt ? ` with deadline ${dueAt}` : ""}`,
+          note?.trim() || `Assigned to ${workerName}${scheduleSummary ? ` | ${scheduleSummary}` : ""}`,
           req.user!.email,
         ],
       );
-    } else if (status) {
+    } else if (isStatusChange && status) {
+      const defaultStatusNote =
+        status === "in_progress"
+          ? currentIssue.status === "in_progress"
+            ? "Admin refreshed in-progress status"
+            : "Admin marked issue in progress"
+          : status === "resolved"
+            ? "Admin confirmed issue resolved after worker completion"
+            : `Status updated to ${status}`;
+
       await pool.query(
         `INSERT INTO timeline_events (issue_id, status, note, created_by)
          VALUES ($1, $2, $3, $4)`,
-        [issueId, status, note?.trim() || `Status updated to ${status}`, req.user!.email],
+        [issueId, status, note?.trim() || defaultStatusNote, req.user!.email],
       );
     }
 
@@ -635,9 +846,8 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
       await awardResolutionRewards({
         issueId,
         reporterUserId: currentIssue.userId,
-        workerUserId:
-          assignedWorkerId !== undefined ? assignedWorkerId : currentIssue.assignedWorkerId,
-        dueAt: dueAt !== undefined ? dueAt : currentIssue.dueAt,
+        workerUserId: nextAssignedWorkerId,
+        dueAt: nextDueAt,
       });
     }
 

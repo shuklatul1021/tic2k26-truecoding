@@ -1,30 +1,72 @@
-import React, { useState } from "react";
-import {
-  View, Text, StyleSheet, ScrollView, Image, Pressable, ActivityIndicator, Alert, Platform, TextInput,
-} from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, Image, Pressable, ActivityIndicator, Alert } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
+import { DateCalendarModal } from "@/components/admin/DateCalendarModal";
 import { issuesApi, workersApi } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { formatDate, formatDateTimeInput, formatTime, getCategoryLabel, getPriorityLabel, getStatusLabel } from "@/lib/utils";
+import { formatDate, formatTime, getCategoryLabel, getPriorityLabel, getStatusLabel } from "@/lib/utils";
+
+type PickerTarget = "start" | "end" | null;
+
+function pad(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function extractDateValue(value?: string | null) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
+}
+
+function formatDateChip(value?: string | null) {
+  if (!value) return "Select date";
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return "Select date";
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function toBoundaryIso(value: string, boundary: "start" | "end") {
+  const [year, month, day] = value.split("-").map(Number);
+  const date =
+    boundary === "start"
+      ? new Date(year, month - 1, day, 0, 0, 0, 0)
+      : new Date(year, month - 1, day, 23, 59, 59, 999);
+  return date.toISOString();
+}
 
 export default function IssueDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const issueId = Number(id);
   const { user } = useAuth();
   const qc = useQueryClient();
   const [showBefore, setShowBefore] = useState(true);
-  const [dueAt, setDueAt] = useState("");
+  const [assignmentStartDate, setAssignmentStartDate] = useState("");
+  const [assignmentEndDate, setAssignmentEndDate] = useState("");
+  const [pickerTarget, setPickerTarget] = useState<PickerTarget>(null);
 
   const { data: issue, isLoading } = useQuery({
     queryKey: ["issue", id],
-    queryFn: () => issuesApi.getById(parseInt(id)),
+    queryFn: () => issuesApi.getById(issueId),
+    enabled: Number.isFinite(issueId),
   });
 
+  useEffect(() => {
+    if (!issue) return;
+    setAssignmentStartDate(extractDateValue(issue.assignmentStartAt));
+    setAssignmentEndDate(extractDateValue(issue.dueAt));
+  }, [issue?.id, issue?.assignmentStartAt, issue?.dueAt]);
+
   const upvoteMutation = useMutation({
-    mutationFn: () => issuesApi.upvote(parseInt(id)),
+    mutationFn: () => issuesApi.upvote(issueId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["issue", id] });
       qc.invalidateQueries({ queryKey: ["issues"] });
@@ -34,26 +76,42 @@ export default function IssueDetailScreen() {
 
   const assignMutation = useMutation({
     mutationFn: (payload: { workerId: number; workerName: string }) =>
-      issuesApi.update(parseInt(id), {
+      issuesApi.update(issueId, {
         assignedWorkerId: payload.workerId,
         assignedTo: payload.workerName,
-        dueAt: dueAt || null,
-        note: `Assigned to ${payload.workerName}`,
+        assignmentStartAt: toBoundaryIso(assignmentStartDate, "start"),
+        dueAt: toBoundaryIso(assignmentEndDate, "end"),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["issue", id] });
       qc.invalidateQueries({ queryKey: ["issues"] });
+      Alert.alert("Worker assigned", "Worker and assignment dates were saved.");
     },
+    onError: (error: Error) => Alert.alert("Assignment failed", error.message),
+  });
+
+  const scheduleMutation = useMutation({
+    mutationFn: () =>
+      issuesApi.update(issueId, {
+        assignmentStartAt: toBoundaryIso(assignmentStartDate, "start"),
+        dueAt: toBoundaryIso(assignmentEndDate, "end"),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["issue", id] });
+      qc.invalidateQueries({ queryKey: ["issues"] });
+      Alert.alert("Schedule updated", "Assignment dates were updated.");
+    },
+    onError: (error: Error) => Alert.alert("Schedule update failed", error.message),
   });
 
   const statusMutation = useMutation({
-    mutationFn: (status: "in_progress" | "resolved") =>
-      issuesApi.update(parseInt(id), { status, dueAt: dueAt || issue?.dueAt || null }),
+    mutationFn: (status: "in_progress" | "resolved") => issuesApi.update(issueId, { status }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["issue", id] });
       qc.invalidateQueries({ queryKey: ["issues"] });
       qc.invalidateQueries({ queryKey: ["admin-stats"] });
     },
+    onError: (error: Error) => Alert.alert("Status update failed", error.message),
   });
 
   const { data: nearbyWorkers } = useQuery({
@@ -73,7 +131,7 @@ export default function IssueDetailScreen() {
   if (!issue) {
     return (
       <View style={styles.loading}>
-        <Text style={{ color: Colors.textSecondary }}>Issue not found</Text>
+        <Text style={styles.emptyText}>Issue not found</Text>
       </View>
     );
   }
@@ -82,304 +140,294 @@ export default function IssueDetailScreen() {
   const priorityBg = { high: Colors.priorityHighBg, medium: Colors.priorityMediumBg, low: Colors.priorityLowBg }[issue.priority];
   const statusColor = { pending: Colors.statusPending, in_progress: Colors.statusInProgress, resolved: Colors.statusResolved }[issue.status];
   const statusBg = { pending: Colors.statusPendingBg, in_progress: Colors.statusInProgressBg, resolved: Colors.statusResolvedBg }[issue.status];
+  const timelineIconColor = { pending: Colors.statusPending, in_progress: Colors.statusInProgress, resolved: Colors.statusResolved };
 
-  const timelineIconColor = {
-    pending: Colors.statusPending,
-    in_progress: Colors.statusInProgress,
-    resolved: Colors.statusResolved,
-  };
+  const originalStartDate = extractDateValue(issue.assignmentStartAt);
+  const originalEndDate = extractDateValue(issue.dueAt);
+  const hasScheduleChanges = assignmentStartDate !== originalStartDate || assignmentEndDate !== originalEndDate;
+  const hasCompleteSchedule = Boolean(assignmentStartDate && assignmentEndDate);
+  const hasValidScheduleRange = hasCompleteSchedule && assignmentEndDate > assignmentStartDate;
+  const isInProgressLocked = Boolean(issue.inProgressLockedUntil && new Date(issue.inProgressLockedUntil).getTime() > Date.now());
+  const canAssignWorker = hasValidScheduleRange;
+  const canSaveSchedule = Boolean(issue.assignedWorkerId && hasValidScheduleRange && hasScheduleChanges);
+
+  function validateSchedule() {
+    if (!hasCompleteSchedule) {
+      Alert.alert("Missing dates", "Choose both start and end dates.");
+      return false;
+    }
+    if (!hasValidScheduleRange) {
+      Alert.alert("Invalid dates", "End date must be later than the start date.");
+      return false;
+    }
+    return true;
+  }
+
+  function handleAssign(workerId: number, workerName: string) {
+    if (!validateSchedule()) return;
+    assignMutation.mutate({ workerId, workerName });
+  }
+
+  function handleScheduleUpdate() {
+    if (!validateSchedule()) return;
+    scheduleMutation.mutate();
+  }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-      <View style={styles.imageContainer}>
-        <Image
-          source={{ uri: showBefore ? issue.imageUrl : (issue.resolvedImageUrl || issue.imageUrl) }}
-          style={styles.heroImage}
-          resizeMode="cover"
-        />
-        {issue.resolvedImageUrl && (
-          <View style={styles.imageToggle}>
-            <Pressable
-              style={[styles.toggleBtn, showBefore && styles.toggleBtnActive]}
-              onPress={() => setShowBefore(true)}
-            >
-              <Text style={[styles.toggleText, showBefore && styles.toggleTextActive]}>Before</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.toggleBtn, !showBefore && styles.toggleBtnActive]}
-              onPress={() => setShowBefore(false)}
-            >
-              <Text style={[styles.toggleText, !showBefore && styles.toggleTextActive]}>After</Text>
-            </Pressable>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.content}>
-        <View style={styles.badgesRow}>
-          <View style={[styles.badge, { backgroundColor: priorityBg }]}>
-            <Text style={[styles.badgeText, { color: priorityColor }]}>{getPriorityLabel(issue.priority)}</Text>
-          </View>
-          <View style={[styles.badge, { backgroundColor: statusBg }]}>
-            <Text style={[styles.badgeText, { color: statusColor }]}>{getStatusLabel(issue.status)}</Text>
-          </View>
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{getCategoryLabel(issue.category)}</Text>
-          </View>
-        </View>
-
-        <Text style={styles.title}>{issue.title}</Text>
-        <Text style={styles.description}>{issue.description}</Text>
-
-        <View style={styles.metaRow}>
-          <Feather name="user" size={14} color={Colors.textSecondary} />
-          <Text style={styles.metaText}>Reported by <Text style={styles.metaHighlight}>{issue.userName}</Text></Text>
-        </View>
-
-        {issue.address && (
-          <View style={styles.metaRow}>
-            <Feather name="map-pin" size={14} color={Colors.textSecondary} />
-            <Text style={styles.metaText} numberOfLines={2}>{issue.address}</Text>
-          </View>
-        )}
-
-        <View style={styles.metaRow}>
-          <Feather name="calendar" size={14} color={Colors.textSecondary} />
-          <Text style={styles.metaText}>{formatDate(issue.createdAt)} at {formatTime(issue.createdAt)}</Text>
-        </View>
-
-        {issue.assignedTo && (
-          <View style={styles.metaRow}>
-            <Feather name="briefcase" size={14} color={Colors.textSecondary} />
-            <Text style={styles.metaText}>Assigned to: <Text style={styles.metaHighlight}>{issue.assignedTo}</Text></Text>
-          </View>
-        )}
-
-        {issue.confidenceScore != null && (
-          <View style={styles.aiChip}>
-            <Feather name="zap" size={13} color={Colors.secondary} />
-            <Text style={styles.aiText}>AI classified | {Math.round(issue.confidenceScore * 100)}% confidence</Text>
-          </View>
-        )}
-
-        {issue.verificationSummary && (
-          <View
-            style={[
-              styles.verificationCard,
-              issue.verificationStatus === "rejected" ? styles.verificationCardRejected : styles.verificationCardVerified,
-            ]}
-          >
-            <Text style={styles.verificationTitle}>Verification</Text>
-            <Text style={styles.verificationText}>{issue.verificationSummary}</Text>
-            <Text style={styles.verificationText}>
-              Real image: {issue.isRealImage ? "Yes" : "No"} | Detected: {issue.detected ? "Yes" : "No"}
-            </Text>
-            <Text style={styles.verificationText}>
-              Authenticity: {Math.round((issue.authenticityConfidence ?? issue.authenticityScore ?? 0) * 100)}% | Confidence: {Math.round((issue.confidenceScore ?? 0) * 100)}%
-            </Text>
-            <Text style={styles.verificationText}>
-              Coverage: {Math.round(issue.coveragePercentage ?? 0)}% | Density: {Number(issue.densityScore ?? 0).toFixed(2)}
-            </Text>
-            <Text style={styles.verificationText}>
-              Image shows: {issue.imageSubject || "Unknown"}
-            </Text>
-            <Text style={styles.verificationText}>
-              Authenticity note: {issue.authenticityExplanation || "No authenticity note"}
-            </Text>
-            <Text style={styles.verificationText}>
-              Explanation: {issue.explanation || issue.verificationSummary}
-            </Text>
-            <Text style={styles.verificationText}>
-              Location: {issue.locationVerified ? "matched" : "not matched"}
-            </Text>
-          </View>
-        )}
-
-        {(issue.rewardPoints || issue.workerPoints || issue.workerBonusPoints) ? (
-          <View style={styles.rewardCard}>
-            <Text style={styles.rewardTitle}>Rewards</Text>
-            <Text style={styles.rewardText}>Citizen reward: {issue.rewardPoints ?? 0} pts</Text>
-            <Text style={styles.rewardText}>Worker reward: {issue.workerPoints ?? 0} pts</Text>
-            <Text style={styles.rewardText}>Worker bonus: {issue.workerBonusPoints ?? 0} pts</Text>
-          </View>
-        ) : null}
-
-        {user?.role === "admin" && (
-          <View style={styles.adminPanel}>
-            <Text style={styles.sectionTitle}>Admin Assignment</Text>
-            <TextInput
-              style={styles.deadlineInput}
-              value={dueAt}
-              onChangeText={setDueAt}
-              placeholder={formatDateTimeInput(issue.dueAt) || "YYYY-MM-DDTHH:mm"}
-              placeholderTextColor={Colors.placeholder}
-            />
-            <View style={styles.quickActions}>
-              <Pressable style={styles.actionPill} onPress={() => statusMutation.mutate("in_progress")}>
-                <Text style={styles.actionPillText}>Mark In Progress</Text>
+    <>
+      <ScrollView style={styles.container} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <View style={styles.imageWrap}>
+          <Image source={{ uri: showBefore ? issue.imageUrl : issue.resolvedImageUrl || issue.imageUrl }} style={styles.heroImage} />
+          {issue.resolvedImageUrl ? (
+            <View style={styles.toggleWrap}>
+              <Pressable style={[styles.toggleBtn, showBefore && styles.toggleBtnActive]} onPress={() => setShowBefore(true)}>
+                <Text style={[styles.toggleText, showBefore && styles.toggleTextActive]}>Before</Text>
               </Pressable>
-              <Pressable style={styles.actionPill} onPress={() => statusMutation.mutate("resolved")}>
-                <Text style={styles.actionPillText}>Mark Resolved</Text>
+              <Pressable style={[styles.toggleBtn, !showBefore && styles.toggleBtnActive]} onPress={() => setShowBefore(false)}>
+                <Text style={[styles.toggleText, !showBefore && styles.toggleTextActive]}>After</Text>
               </Pressable>
             </View>
-            <Text style={styles.workerSectionTitle}>Nearby Workers</Text>
-            {(nearbyWorkers ?? []).map((worker) => (
-              <View key={worker.id} style={styles.workerRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.workerName}>{worker.name}</Text>
-                  <Text style={styles.workerMeta}>
-                    {worker.distanceKm?.toFixed(1)} km away | {(worker.skills ?? []).join(", ")}
-                  </Text>
-                </View>
-                <Pressable
-                  style={styles.assignBtn}
-                  onPress={() => assignMutation.mutate({ workerId: worker.id, workerName: worker.name })}
-                >
-                  <Text style={styles.assignBtnText}>Assign</Text>
-                </Pressable>
-              </View>
-            ))}
-          </View>
-        )}
-
-        <Pressable
-          style={[styles.upvoteBtn, issue.hasUpvoted && styles.upvoteBtnActive]}
-          onPress={() => user ? upvoteMutation.mutate() : router.push("/auth/login")}
-          disabled={upvoteMutation.isPending}
-        >
-          <Ionicons
-            name={issue.hasUpvoted ? "arrow-up-circle" : "arrow-up-circle-outline"}
-            size={22}
-            color={issue.hasUpvoted ? "#fff" : Colors.primary}
-          />
-          <Text style={[styles.upvoteText, issue.hasUpvoted && { color: "#fff" }]}>
-            {issue.upvotes} {issue.upvotes === 1 ? "upvote" : "upvotes"}
-          </Text>
-        </Pressable>
-
-        <View style={styles.divider} />
-
-        <Text style={styles.sectionTitle}>Timeline</Text>
-        <View style={styles.timeline}>
-          {(issue.timeline ?? []).map((event, idx) => {
-            const isFirst = idx === 0;
-            const color = (timelineIconColor as any)[event.status] || Colors.textSecondary;
-            return (
-              <View key={event.id} style={styles.timelineItem}>
-                <View style={styles.timelineLeft}>
-                  <View style={[styles.timelineDot, { backgroundColor: color }]} />
-                  {idx < (issue.timeline?.length ?? 0) - 1 && <View style={styles.timelineLine} />}
-                </View>
-                <View style={styles.timelineContent}>
-                  <Text style={styles.timelineStatus}>{getStatusLabel(event.status)}</Text>
-                  {event.note && <Text style={styles.timelineNote}>{event.note}</Text>}
-                  {event.createdBy && <Text style={styles.timelineBy}>by {event.createdBy}</Text>}
-                  <Text style={styles.timelineDate}>{formatDate(event.createdAt)} | {formatTime(event.createdAt)}</Text>
-                </View>
-              </View>
-            );
-          })}
-          {(issue.timeline?.length ?? 0) === 0 && (
-            <Text style={{ color: Colors.textSecondary, fontSize: 14 }}>No timeline events yet</Text>
-          )}
+          ) : null}
         </View>
 
-        <View style={styles.divider} />
-
-        <Text style={styles.sectionTitle}>Worker Daily Reports</Text>
-        {(issue.workerReports ?? []).map((report) => (
-          <View key={report.id} style={styles.reportCard}>
-            <Text style={styles.reportTitle}>{report.workerName || "Worker"} | {report.status.replace(/_/g, " ")}</Text>
-            <Text style={styles.reportBody}>{report.note}</Text>
-            <Text style={styles.reportMeta}>{report.imageVerificationSummary || "Image verification pending"}</Text>
-            <Text style={styles.reportMeta}>{formatDate(report.createdAt)} | {formatTime(report.createdAt)}</Text>
+        <View style={styles.content}>
+          <View style={styles.badgesRow}>
+            <View style={[styles.badge, { backgroundColor: priorityBg }]}><Text style={[styles.badgeText, { color: priorityColor }]}>{getPriorityLabel(issue.priority)}</Text></View>
+            <View style={[styles.badge, { backgroundColor: statusBg }]}><Text style={[styles.badgeText, { color: statusColor }]}>{getStatusLabel(issue.status)}</Text></View>
+            <View style={styles.badge}><Text style={styles.badgeText}>{getCategoryLabel(issue.category)}</Text></View>
           </View>
-        ))}
-        {(issue.workerReports?.length ?? 0) === 0 && (
-          <Text style={{ color: Colors.textSecondary, fontSize: 14 }}>No worker reports yet</Text>
-        )}
-      </View>
-    </ScrollView>
+
+          <Text style={styles.title}>{issue.title}</Text>
+          <Text style={styles.description}>{issue.description}</Text>
+
+          <View style={styles.metaRow}><Feather name="user" size={14} color={Colors.textSecondary} /><Text style={styles.metaText}>Reported by <Text style={styles.metaHighlight}>{issue.userName}</Text></Text></View>
+          {issue.address ? <View style={styles.metaRow}><Feather name="map-pin" size={14} color={Colors.textSecondary} /><Text style={styles.metaText}>{issue.address}</Text></View> : null}
+          <View style={styles.metaRow}><Feather name="calendar" size={14} color={Colors.textSecondary} /><Text style={styles.metaText}>{formatDate(issue.createdAt)} at {formatTime(issue.createdAt)}</Text></View>
+          {issue.assignedTo ? <View style={styles.metaRow}><Feather name="briefcase" size={14} color={Colors.textSecondary} /><Text style={styles.metaText}>Assigned to <Text style={styles.metaHighlight}>{issue.assignedTo}</Text>{issue.assignedWorkerRoleTitle ? ` | ${issue.assignedWorkerRoleTitle}` : ""}</Text></View> : null}
+          {issue.assignmentStartAt ? <View style={styles.metaRow}><Feather name="play-circle" size={14} color={Colors.textSecondary} /><Text style={styles.metaText}>Start date: {formatDate(issue.assignmentStartAt)}</Text></View> : null}
+          {issue.dueAt ? <View style={styles.metaRow}><Feather name="flag" size={14} color={Colors.textSecondary} /><Text style={styles.metaText}>End date: {formatDate(issue.dueAt)}</Text></View> : null}
+
+          {issue.verificationSummary ? (
+            <View style={styles.infoCard}>
+              <Text style={styles.infoTitle}>Verification</Text>
+              <Text style={styles.infoText}>{issue.verificationSummary}</Text>
+            </View>
+          ) : null}
+          {issue.rewardPoints || issue.workerPoints || issue.workerBonusPoints ? (
+            <View style={styles.infoCard}>
+              <Text style={styles.infoTitle}>Rewards</Text>
+              <Text style={styles.infoText}>Citizen reward: {issue.rewardPoints ?? 0} pts</Text>
+              <Text style={styles.infoText}>Worker reward: {issue.workerPoints ?? 0} pts</Text>
+              <Text style={styles.infoText}>Worker bonus: {issue.workerBonusPoints ?? 0} pts</Text>
+            </View>
+          ) : null}
+
+          {user?.role === "admin" ? (
+            <View style={styles.adminCard}>
+              <Text style={styles.sectionTitle}>Admin Assignment</Text>
+              <Text style={styles.helperText}>Choose start and end dates, then assign one worker. Reassignment is blocked once someone is assigned.</Text>
+
+              <View style={styles.scheduleRow}>
+                <Pressable style={styles.dateCard} onPress={() => setPickerTarget("start")}>
+                  <Text style={styles.dateLabel}>Start date</Text>
+                  <Text style={styles.dateValue}>{formatDateChip(assignmentStartDate)}</Text>
+                </Pressable>
+                <Pressable style={styles.dateCard} onPress={() => setPickerTarget("end")}>
+                  <Text style={styles.dateLabel}>End date</Text>
+                  <Text style={styles.dateValue}>{formatDateChip(assignmentEndDate)}</Text>
+                </Pressable>
+              </View>
+
+              {canSaveSchedule ? (
+                <Pressable style={[styles.saveBtn, scheduleMutation.isPending && styles.buttonDisabled]} onPress={handleScheduleUpdate} disabled={scheduleMutation.isPending}>
+                  {scheduleMutation.isPending ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Update assignment dates</Text>}
+                </Pressable>
+              ) : null}
+
+              <View style={styles.statusRow}>
+                <Pressable
+                  style={[styles.statusBtn, (statusMutation.isPending || issue.status === "resolved" || isInProgressLocked) && styles.buttonDisabled]}
+                  onPress={() => statusMutation.mutate("in_progress")}
+                  disabled={statusMutation.isPending || issue.status === "resolved" || isInProgressLocked}
+                >
+                  <Text style={styles.statusBtnText}>Mark In Progress</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.statusBtn, styles.statusBtnResolve, (statusMutation.isPending || issue.status === "resolved" || !issue.canAdminMarkResolved) && styles.buttonDisabled]}
+                  onPress={() => statusMutation.mutate("resolved")}
+                  disabled={statusMutation.isPending || issue.status === "resolved" || !issue.canAdminMarkResolved}
+                >
+                  <Text style={styles.statusBtnResolveText}>Confirm Resolved</Text>
+                </Pressable>
+              </View>
+
+              {isInProgressLocked && issue.inProgressLockedUntil ? <Text style={styles.ruleText}>In-progress can be clicked again after {formatDate(issue.inProgressLockedUntil)}.</Text> : null}
+              {!issue.canAdminMarkResolved ? <Text style={styles.ruleText}>Admin can resolve only after the assigned worker sends a resolved report.</Text> : null}
+
+              <View style={styles.workflowBox}>
+                <Text style={styles.workflowTitle}>Worker progress gate</Text>
+                <Text style={styles.workflowText}>Latest worker update: {issue.latestWorkerReportStatus ? getStatusLabel(issue.latestWorkerReportStatus) : "No worker update yet"}</Text>
+                <Text style={styles.workflowText}>Worker resolved at: {issue.workerMarkedResolvedAt ? `${formatDate(issue.workerMarkedResolvedAt)} ${formatTime(issue.workerMarkedResolvedAt)}` : "Pending"}</Text>
+              </View>
+
+              <Text style={styles.workerSectionTitle}>Nearby Workers</Text>
+              {(nearbyWorkers ?? []).length === 0 ? <Text style={styles.emptyText}>No verified nearby workers found.</Text> : null}
+              {(nearbyWorkers ?? []).map((worker) => {
+                const assignedElsewhere = Boolean(issue.assignedWorkerId && issue.assignedWorkerId !== worker.id);
+                const isAssignedWorker = issue.assignedWorkerId === worker.id;
+
+                return (
+                  <View key={worker.id} style={styles.workerRow}>
+                    <View style={styles.workerInfo}>
+                      <Text style={styles.workerName}>{worker.name}</Text>
+                      <Text style={styles.workerMeta}>Role: {worker.role || "worker"} | Title: {worker.roleTitle || "Not set"}</Text>
+                      <Text style={styles.workerMeta}>{worker.distanceKm?.toFixed(1)} km away | {(worker.skills ?? []).join(", ") || "No skills listed"}</Text>
+                    </View>
+                    {isAssignedWorker ? (
+                      <View style={styles.assignedPill}><Text style={styles.assignedPillText}>Assigned</Text></View>
+                    ) : (
+                      <Pressable
+                        style={[styles.assignBtn, (!canAssignWorker || assignedElsewhere || assignMutation.isPending) && styles.buttonDisabled]}
+                        onPress={() => handleAssign(worker.id, worker.name)}
+                        disabled={!canAssignWorker || assignedElsewhere || assignMutation.isPending}
+                      >
+                        <Text style={styles.assignBtnText}>Assign</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                );
+              })}
+              {!hasCompleteSchedule ? <Text style={styles.ruleText}>Pick both dates before assigning a worker.</Text> : null}
+              {hasCompleteSchedule && !hasValidScheduleRange ? <Text style={styles.ruleText}>End date must be later than the start date.</Text> : null}
+            </View>
+          ) : null}
+
+          {user?.role !== "admin" ? (
+            <Pressable style={[styles.upvoteBtn, issue.hasUpvoted && styles.upvoteBtnActive]} onPress={() => (user ? upvoteMutation.mutate() : router.push("/auth/login"))} disabled={upvoteMutation.isPending}>
+              <Ionicons name={issue.hasUpvoted ? "arrow-up-circle" : "arrow-up-circle-outline"} size={22} color={issue.hasUpvoted ? "#fff" : Colors.primary} />
+              <Text style={[styles.upvoteText, issue.hasUpvoted && { color: "#fff" }]}>{issue.upvotes} {issue.upvotes === 1 ? "upvote" : "upvotes"}</Text>
+            </Pressable>
+          ) : null}
+
+          <View style={styles.divider} />
+          <Text style={styles.sectionTitle}>Timeline</Text>
+          {(issue.timeline ?? []).map((event, idx) => (
+            <View key={event.id} style={styles.timelineItem}>
+              <View style={styles.timelineLeft}>
+                <View style={[styles.timelineDot, { backgroundColor: timelineIconColor[event.status as keyof typeof timelineIconColor] || Colors.textSecondary }]} />
+                {idx < (issue.timeline?.length ?? 0) - 1 ? <View style={styles.timelineLine} /> : null}
+              </View>
+              <View style={styles.timelineContent}>
+                <Text style={styles.timelineStatus}>{getStatusLabel(event.status)}</Text>
+                {event.note ? <Text style={styles.timelineNote}>{event.note}</Text> : null}
+                {event.createdBy ? <Text style={styles.timelineBy}>by {event.createdBy}</Text> : null}
+                <Text style={styles.timelineDate}>{formatDate(event.createdAt)} | {formatTime(event.createdAt)}</Text>
+              </View>
+            </View>
+          ))}
+          {(issue.timeline?.length ?? 0) === 0 ? <Text style={styles.emptyText}>No timeline events yet</Text> : null}
+
+          <View style={styles.divider} />
+          <Text style={styles.sectionTitle}>Worker Daily Reports</Text>
+          {(issue.workerReports ?? []).map((report) => (
+            <View key={report.id} style={styles.reportCard}>
+              <Text style={styles.reportTitle}>{report.workerName || "Worker"} | {report.status.replace(/_/g, " ")}</Text>
+              <Text style={styles.reportBody}>{report.note}</Text>
+              <Text style={styles.reportMeta}>{report.imageVerificationSummary || "Image verification pending"}</Text>
+              <Text style={styles.reportMeta}>{formatDate(report.createdAt)} | {formatTime(report.createdAt)}</Text>
+            </View>
+          ))}
+          {(issue.workerReports?.length ?? 0) === 0 ? <Text style={styles.emptyText}>No worker reports yet</Text> : null}
+        </View>
+      </ScrollView>
+
+      <DateCalendarModal
+        visible={pickerTarget === "start"}
+        title="Select Start Date"
+        value={assignmentStartDate}
+        onClose={() => setPickerTarget(null)}
+        onSelect={setAssignmentStartDate}
+        onClear={() => { setAssignmentStartDate(""); setPickerTarget(null); }}
+      />
+      <DateCalendarModal
+        visible={pickerTarget === "end"}
+        title="Select End Date"
+        value={assignmentEndDate}
+        onClose={() => setPickerTarget(null)}
+        onSelect={setAssignmentEndDate}
+        onClear={() => { setAssignmentEndDate(""); setPickerTarget(null); }}
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  scroll: { paddingBottom: 40 },
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
-  imageContainer: { position: "relative" },
+  imageWrap: { position: "relative" },
   heroImage: { width: "100%", height: 260, backgroundColor: Colors.borderLight },
-  imageToggle: {
-    position: "absolute", bottom: 12, right: 12,
-    flexDirection: "row", backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 20, overflow: "hidden",
-  },
+  toggleWrap: { position: "absolute", right: 12, bottom: 12, flexDirection: "row", borderRadius: 20, overflow: "hidden", backgroundColor: "rgba(0,0,0,0.6)" },
   toggleBtn: { paddingHorizontal: 16, paddingVertical: 8 },
   toggleBtnActive: { backgroundColor: Colors.primary },
   toggleText: { color: "rgba(255,255,255,0.7)", fontSize: 13, fontWeight: "600" as const },
   toggleTextActive: { color: "#fff" },
   content: { padding: 20 },
   badgesRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 14 },
-  badge: {
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
-    backgroundColor: Colors.background,
-  },
+  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, backgroundColor: Colors.background },
   badgeText: { fontSize: 12, fontWeight: "600" as const, color: Colors.textSecondary },
-  title: { fontSize: 22, fontWeight: "700" as const, color: Colors.text, marginBottom: 10, lineHeight: 30 },
+  title: { fontSize: 22, fontWeight: "700" as const, color: Colors.text, lineHeight: 30, marginBottom: 10 },
   description: { fontSize: 15, color: Colors.textSecondary, lineHeight: 22, marginBottom: 16 },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
-  metaText: { fontSize: 14, color: Colors.textSecondary, flex: 1 },
-  metaHighlight: { fontWeight: "600" as const, color: Colors.text },
-  aiChip: {
-    flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: Colors.secondaryLight,
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, alignSelf: "flex-start", marginTop: 8,
-  },
-  verificationCard: { borderRadius: 16, padding: 14, marginTop: 14, gap: 4, borderWidth: 1 },
-  verificationCardVerified: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
-  verificationCardRejected: { backgroundColor: Colors.dangerLight, borderColor: Colors.danger },
-  verificationTitle: { fontSize: 14, fontWeight: "700" as const, color: Colors.primary },
-  verificationText: { fontSize: 13, color: Colors.textSecondary, lineHeight: 18 },
-  rewardCard: { backgroundColor: Colors.warningLight, borderRadius: 16, padding: 14, marginTop: 14, gap: 4 },
-  rewardTitle: { fontSize: 14, fontWeight: "700" as const, color: Colors.warning },
-  rewardText: { fontSize: 13, color: Colors.textSecondary },
-  adminPanel: { marginTop: 18, gap: 10 },
-  deadlineInput: {
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 12,
-    backgroundColor: Colors.surface,
-    paddingHorizontal: 14,
-    height: 48,
-    color: Colors.text,
-  },
-  quickActions: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
-  actionPill: { backgroundColor: Colors.primaryLight, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10 },
-  actionPillText: { color: Colors.primary, fontWeight: "700" as const, fontSize: 13 },
-  workerSectionTitle: { fontSize: 15, fontWeight: "700" as const, color: Colors.text, marginTop: 4 },
-  workerRow: { flexDirection: "row", gap: 10, alignItems: "center", backgroundColor: Colors.surface, borderRadius: 14, padding: 12 },
+  metaText: { flex: 1, fontSize: 14, color: Colors.textSecondary },
+  metaHighlight: { color: Colors.text, fontWeight: "600" as const },
+  adminCard: { marginTop: 18, padding: 16, borderRadius: 20, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, gap: 12 },
+  infoCard: { marginTop: 8, padding: 14, borderRadius: 16, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, gap: 4 },
+  infoTitle: { fontSize: 14, fontWeight: "700" as const, color: Colors.text },
+  infoText: { fontSize: 13, color: Colors.textSecondary, lineHeight: 18 },
+  helperText: { fontSize: 13, color: Colors.textSecondary, lineHeight: 19 },
+  scheduleRow: { flexDirection: "row", gap: 10 },
+  dateCard: { flex: 1, borderRadius: 14, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.background, paddingHorizontal: 14, paddingVertical: 12, gap: 6 },
+  dateLabel: { fontSize: 12, fontWeight: "700" as const, color: Colors.textSecondary, textTransform: "uppercase" },
+  dateValue: { fontSize: 14, fontWeight: "700" as const, color: Colors.text },
+  saveBtn: { height: 46, borderRadius: 14, backgroundColor: Colors.secondary, alignItems: "center", justifyContent: "center" },
+  saveBtnText: { color: "#fff", fontSize: 14, fontWeight: "700" as const },
+  statusRow: { flexDirection: "row", gap: 10 },
+  statusBtn: { flex: 1, minWidth: 150, borderRadius: 16, paddingVertical: 12, alignItems: "center", backgroundColor: Colors.primaryLight },
+  statusBtnResolve: { backgroundColor: Colors.successLight },
+  statusBtnText: { color: Colors.primary, fontSize: 13, fontWeight: "700" as const },
+  statusBtnResolveText: { color: Colors.success, fontSize: 13, fontWeight: "700" as const },
+  workflowBox: { borderRadius: 16, padding: 12, backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.border, gap: 4 },
+  workflowTitle: { fontSize: 13, fontWeight: "700" as const, color: Colors.text },
+  workflowText: { fontSize: 13, color: Colors.textSecondary, lineHeight: 18 },
+  workerSectionTitle: { fontSize: 15, fontWeight: "700" as const, color: Colors.text },
+  workerRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.background },
+  workerInfo: { flex: 1, gap: 2 },
   workerName: { fontSize: 14, fontWeight: "700" as const, color: Colors.text },
-  workerMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
-  assignBtn: { backgroundColor: Colors.primary, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10 },
-  assignBtnText: { color: "#fff", fontWeight: "700" as const, fontSize: 13 },
-  aiText: { fontSize: 13, color: Colors.secondary, fontWeight: "500" as const },
-  upvoteBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    marginTop: 16, padding: 14, borderRadius: 14, borderWidth: 2, borderColor: Colors.primary,
-  },
+  workerMeta: { fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
+  assignBtn: { borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: Colors.primary },
+  assignBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" as const },
+  assignedPill: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: Colors.successLight },
+  assignedPillText: { color: Colors.success, fontSize: 12, fontWeight: "700" as const },
+  buttonDisabled: { opacity: 0.45 },
+  ruleText: { fontSize: 12, color: Colors.textSecondary, lineHeight: 18 },
+  upvoteBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 16, padding: 14, borderRadius: 14, borderWidth: 2, borderColor: Colors.primary },
   upvoteBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  upvoteText: { fontSize: 16, fontWeight: "600" as const, color: Colors.primary },
+  upvoteText: { color: Colors.primary, fontSize: 16, fontWeight: "600" as const },
   divider: { height: 1, backgroundColor: Colors.border, marginVertical: 20 },
-  sectionTitle: { fontSize: 18, fontWeight: "700" as const, color: Colors.text, marginBottom: 16 },
-  timeline: { gap: 0 },
+  sectionTitle: { fontSize: 18, fontWeight: "700" as const, color: Colors.text, marginBottom: 8 },
   timelineItem: { flexDirection: "row", gap: 12 },
-  timelineLeft: { alignItems: "center", width: 20 },
+  timelineLeft: { width: 20, alignItems: "center" },
   timelineDot: { width: 12, height: 12, borderRadius: 6, marginTop: 4 },
-  timelineLine: { flex: 1, width: 2, backgroundColor: Colors.border, marginTop: 4 },
+  timelineLine: { flex: 1, width: 2, marginTop: 4, backgroundColor: Colors.border },
   timelineContent: { flex: 1, paddingBottom: 20 },
   timelineStatus: { fontSize: 15, fontWeight: "600" as const, color: Colors.text },
   timelineNote: { fontSize: 14, color: Colors.textSecondary, marginTop: 2 },
   timelineBy: { fontSize: 12, color: Colors.textTertiary, marginTop: 2 },
   timelineDate: { fontSize: 12, color: Colors.textTertiary, marginTop: 2 },
-  reportCard: { backgroundColor: Colors.surface, borderRadius: 16, padding: 14, marginBottom: 10 },
+  reportCard: { marginBottom: 10, padding: 14, borderRadius: 16, backgroundColor: Colors.surface },
   reportTitle: { fontSize: 14, fontWeight: "700" as const, color: Colors.text },
   reportBody: { fontSize: 14, color: Colors.textSecondary, marginTop: 6, lineHeight: 20 },
   reportMeta: { fontSize: 12, color: Colors.textTertiary, marginTop: 4 },
+  emptyText: { fontSize: 14, color: Colors.textSecondary },
 });

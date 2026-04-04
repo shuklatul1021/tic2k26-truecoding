@@ -46,10 +46,15 @@ export default function LoginScreen() {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+    >
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 20 }]}
+        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         <Pressable style={styles.back} onPress={() => router.replace("/auth/welcome" as never)}>
           <Feather name="arrow-left" size={20} color={Colors.primary} />
@@ -72,10 +77,7 @@ export default function LoginScreen() {
 
         <View style={styles.form}>
           <Text style={styles.formTitle}>Sign in</Text>
-          <Text style={styles.formSubtitle}>
-            Users can create accounts. Admins sign in with backend credentials. Workers sign in with credentials created by admins.
-          </Text>
-
+        
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Email</Text>
             <View style={styles.inputWrapper}>
@@ -143,9 +145,9 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   scroll: { flexGrow: 1, paddingHorizontal: 24 },
-  back: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
+  back: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 },
   backText: { color: Colors.primary, fontSize: 15, fontWeight: "500" as const },
-  header: { alignItems: "center", marginBottom: 36 },
+  header: { alignItems: "center", marginBottom: 28 },
   logo: {
     width: 72,
     height: 72,
@@ -153,9 +155,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primaryLight,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 14,
+    marginBottom: 10,
   },
-  appName: { fontSize: 28, fontWeight: "700" as const, color: Colors.text, marginBottom: 8 },
+  appName: { fontSize: 28, fontWeight: "700" as const, color: Colors.text, marginBottom: 6 },
   badge: {
     flexDirection: "row",
     alignItems: "center",
@@ -164,7 +166,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 20,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   badgeText: { fontSize: 12, fontWeight: "600" as const, color: Colors.primary },
   tagline: { fontSize: 15, color: Colors.textSecondary, textAlign: "center", lineHeight: 22 },

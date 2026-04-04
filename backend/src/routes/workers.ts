@@ -1,5 +1,6 @@
 import { Router, type Response } from "express";
 import { pool } from "../db/pool.js";
+import { isIssueStatus } from "../db/queries.js";
 import { requireAuth } from "../middleware/auth.js";
 import type { AuthenticatedRequest } from "../types/auth.js";
 import { logger } from "../lib/logger.js";
@@ -74,12 +75,14 @@ router.get("/nearby", requireAuth, async (req: AuthenticatedRequest, res) => {
     }
 
     const result = await pool.query(
-      `SELECT
+       `SELECT
          u.id,
          u.name,
          u.email,
+         u.role,
          u.points_balance AS "pointsBalance",
          u.wallet_balance AS "walletBalance",
+         wp.role_title AS "roleTitle",
          wp.skills,
          wp.work_latitude AS "workLatitude",
          wp.work_longitude AS "workLongitude",
@@ -232,6 +235,11 @@ router.post("/issues/:id/reports", requireAuth, async (req: AuthenticatedRequest
         return;
       }
 
+      if (!isIssueStatus(status.trim()) || !["in_progress", "resolved"].includes(status.trim())) {
+        res.status(400).json({ error: "BadRequest", message: "Workers can only submit in progress or resolved updates" });
+        return;
+      }
+
       const assignment = await pool.query(
         `SELECT id FROM issues WHERE id = $1 AND assigned_worker_id = $2 LIMIT 1`,
         [issueId, req.user!.userId],
@@ -278,7 +286,14 @@ router.post("/issues/:id/reports", requireAuth, async (req: AuthenticatedRequest
       await pool.query(
         `INSERT INTO timeline_events (issue_id, status, note, created_by)
          VALUES ($1, $2, $3, $4)`,
-        [issueId, "in_progress", `Worker update: ${note.trim()}`, req.user!.email],
+        [
+          issueId,
+          "in_progress",
+          status.trim() === "resolved"
+            ? `Worker marked task resolved: ${note.trim()}`
+            : `Worker update: ${note.trim()}`,
+          req.user!.email,
+        ],
       );
 
       res.status(201).json(result.rows[0]);

@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import {
   View, Text, TextInput, Pressable, StyleSheet, ScrollView,
-  KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
+  KeyboardAvoidingView, Platform,
+  ActivityIndicator, Alert,
 } from "react-native";
 import { router, Link } from "expo-router";
 import { Feather } from "@expo/vector-icons";
@@ -44,10 +45,15 @@ export default function RegisterScreen() {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+    >
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 20 }]}
+        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         <Pressable style={styles.back} onPress={() => router.replace("/auth/login" as never)}>
           <Feather name="arrow-left" size={20} color={Colors.primary} />
@@ -64,9 +70,6 @@ export default function RegisterScreen() {
 
         <View style={styles.form}>
           <Text style={styles.formTitle}>Create account</Text>
-          <Text style={styles.formSubtitle}>
-            This page is for normal users. Admin and worker accounts are created separately and use the shared login page.
-          </Text>
 
           {[
             { label: "Full Name", value: name, setter: setName, icon: "user" as const, placeholder: "John Doe", autoCapitalize: "words" as const },
@@ -127,14 +130,14 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   scroll: { flexGrow: 1, paddingHorizontal: 24 },
-  back: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
+  back: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 },
   backText: { color: Colors.primary, fontSize: 15, fontWeight: "500" as const },
-  header: { alignItems: "center", marginBottom: 40 },
+  header: { alignItems: "center", marginBottom: 28 },
   logo: {
     width: 72, height: 72, borderRadius: 20, backgroundColor: Colors.primaryLight,
-    alignItems: "center", justifyContent: "center", marginBottom: 16,
+    alignItems: "center", justifyContent: "center", marginBottom: 10,
   },
-  appName: { fontSize: 28, fontWeight: "700" as const, color: Colors.text, marginBottom: 4 },
+  appName: { fontSize: 28, fontWeight: "700" as const, color: Colors.text, marginBottom: 2 },
   tagline: { fontSize: 15, color: Colors.textSecondary },
   form: {
     backgroundColor: Colors.surface, borderRadius: 24, padding: 24,

@@ -24,9 +24,11 @@ const priorityFilterMap: Record<string, IssuePriority | undefined> = {
 };
 
 const statusOptions: IssueStatus[] = ["pending", "in_progress", "resolved"];
+type QueueView = "issues" | "resolved";
 
 export default function AdminDashboard() {
   const qc = useQueryClient();
+  const [queueView, setQueueView] = useState<QueueView>("issues");
   const [statusFilter, setStatusFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
 
@@ -35,7 +37,7 @@ export default function AdminDashboard() {
     queryFn: adminApi.getStats,
   });
 
-  const statusParam = statusFilterMap[statusFilter];
+  const statusParam = queueView === "resolved" ? "resolved" : statusFilterMap[statusFilter];
   const priorityParam = priorityFilterMap[priorityFilter];
 
   const { data, isLoading } = useQuery({
@@ -89,6 +91,12 @@ export default function AdminDashboard() {
     [stats],
   );
 
+  const visibleIssues = useMemo(
+    () =>
+      (data?.issues ?? []).filter((issue) => (queueView === "resolved" ? issue.status === "resolved" : issue.status !== "resolved")),
+    [data?.issues, queueView],
+  );
+
   return (
     <AdminPageFrame
       eyebrow="Admin home"
@@ -121,21 +129,29 @@ export default function AdminDashboard() {
       </View>
 
       <View style={styles.panel}>
-        <Text style={styles.sectionTitle}>Issue queue</Text>
-        <Text style={styles.sectionSubtitle}>Filter the live queue and update issue states from the admin home tab.</Text>
+        <Text style={styles.sectionTitle}>{queueView === "resolved" ? "Resolved queue" : "Issue queue"}</Text>
+        <Text style={styles.sectionSubtitle}>
+          {queueView === "resolved"
+            ? "Review closed issues here. Resolved items stay out of the active issue queue."
+            : "Filter the active queue and move pending work through the workflow from the admin home tab."}
+        </Text>
 
-        <Text style={styles.filterLabel}>Status</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRail}>
-          {["All", "Pending", "In Progress", "Resolved"].map((filter) => (
-            <Pressable
-              key={filter}
-              style={[styles.chip, statusFilter === filter && styles.chipActive]}
-              onPress={() => setStatusFilter(filter)}
-            >
-              <Text style={[styles.chipText, statusFilter === filter && styles.chipTextActive]}>{filter}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
+        {queueView === "issues" ? (
+          <>
+            <Text style={styles.filterLabel}>Status</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRail}>
+              {["All", "Pending", "In Progress"].map((filter) => (
+                <Pressable
+                  key={filter}
+                  style={[styles.chip, statusFilter === filter && styles.chipActive]}
+                  onPress={() => setStatusFilter(filter)}
+                >
+                  <Text style={[styles.chipText, statusFilter === filter && styles.chipTextActive]}>{filter}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </>
+        ) : null}
 
         <Text style={[styles.filterLabel, { marginTop: 12 }]}>Priority</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRail}>
@@ -152,9 +168,16 @@ export default function AdminDashboard() {
       </View>
 
       <View style={styles.issueSectionHeader}>
-        <Text style={styles.issuesTitle}>Issues</Text>
+        <View style={styles.queueToggle}>
+          <Pressable style={[styles.queueToggleBtn, queueView === "issues" && styles.queueToggleBtnActive]} onPress={() => setQueueView("issues")}>
+            <Text style={[styles.queueToggleText, queueView === "issues" && styles.queueToggleTextActive]}>Issues</Text>
+          </Pressable>
+          <Pressable style={[styles.queueToggleBtn, queueView === "resolved" && styles.queueToggleBtnActive]} onPress={() => setQueueView("resolved")}>
+            <Text style={[styles.queueToggleText, queueView === "resolved" && styles.queueToggleTextActive]}>Resolved</Text>
+          </Pressable>
+        </View>
         <View style={styles.issueCountPill}>
-          <Text style={styles.issueCountText}>{data?.total ?? 0}</Text>
+          <Text style={styles.issueCountText}>{visibleIssues.length}</Text>
         </View>
       </View>
 
@@ -162,39 +185,45 @@ export default function AdminDashboard() {
         <View style={styles.loadingWrap}>
           <ActivityIndicator color={Colors.primary} />
         </View>
-      ) : (data?.issues?.length ?? 0) === 0 ? (
+      ) : visibleIssues.length === 0 ? (
         <View style={styles.emptyState}>
           <Feather name="inbox" size={34} color={Colors.textTertiary} />
-          <Text style={styles.emptyTitle}>No issues match this filter</Text>
-          <Text style={styles.emptyText}>Adjust the status or priority filters to inspect another part of the queue.</Text>
+          <Text style={styles.emptyTitle}>{queueView === "resolved" ? "No resolved issues match this filter" : "No active issues match this filter"}</Text>
+          <Text style={styles.emptyText}>
+            {queueView === "resolved"
+              ? "Adjust the priority filter to inspect another part of the resolved list."
+              : "Adjust the status or priority filters to inspect another part of the active queue."}
+          </Text>
         </View>
       ) : (
-        (data?.issues ?? []).map((issue) => (
+        visibleIssues.map((issue) => (
           <View key={issue.id}>
             <IssueCard issue={issue} onPress={() => router.push(`/issue/${issue.id}`)} />
-            <View style={styles.adminActions}>
-              {statusOptions.map((status) => {
-                if (status === issue.status) return null;
+            {queueView === "issues" ? (
+              <View style={styles.adminActions}>
+                {statusOptions.map((status) => {
+                  if (status === issue.status || status === "resolved" && issue.status === "resolved") return null;
 
-                const label = getStatusLabel(status);
-                const color = {
-                  pending: Colors.statusPending,
-                  in_progress: Colors.statusInProgress,
-                  resolved: Colors.statusResolved,
-                }[status];
+                  const label = getStatusLabel(status);
+                  const color = {
+                    pending: Colors.statusPending,
+                    in_progress: Colors.statusInProgress,
+                    resolved: Colors.statusResolved,
+                  }[status];
 
-                return (
-                  <Pressable
-                    key={status}
-                    style={[styles.actionBtn, { borderColor: color ?? Colors.border }]}
-                    onPress={() => updateMutation.mutate({ id: issue.id, status })}
-                    disabled={updateMutation.isPending}
-                  >
-                    <Text style={[styles.actionBtnText, { color }]}>Set {label}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+                  return (
+                    <Pressable
+                      key={status}
+                      style={[styles.actionBtn, { borderColor: color ?? Colors.border }]}
+                      onPress={() => updateMutation.mutate({ id: issue.id, status })}
+                      disabled={updateMutation.isPending}
+                    >
+                      <Text style={[styles.actionBtnText, { color }]}>Set {label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
           </View>
         ))
       )}
@@ -341,10 +370,34 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
   },
-  issuesTitle: {
-    fontSize: 17,
+  queueToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: Colors.surface,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: 4,
+  },
+  queueToggleBtn: {
+    minWidth: 94,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  queueToggleBtnActive: {
+    backgroundColor: Colors.primary,
+  },
+  queueToggleText: {
+    fontSize: 13,
     fontWeight: "800" as const,
-    color: Colors.text,
+    color: Colors.textSecondary,
+  },
+  queueToggleTextActive: {
+    color: Colors.textInverse,
   },
   issueCountPill: {
     minWidth: 34,

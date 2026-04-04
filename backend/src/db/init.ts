@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS issues (
   address TEXT,
   assigned_to TEXT,
   assigned_worker_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  assignment_start_at TIMESTAMPTZ,
   due_at TIMESTAMPTZ,
   resolved_at TIMESTAMPTZ,
   verification_status TEXT NOT NULL DEFAULT 'verified',
@@ -90,6 +91,7 @@ CREATE TABLE IF NOT EXISTS issues (
 );
 
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS assigned_worker_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS assignment_start_at TIMESTAMPTZ;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'verified';

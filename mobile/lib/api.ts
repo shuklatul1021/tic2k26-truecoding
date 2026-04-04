@@ -150,6 +150,8 @@ export interface Issue {
   assignedTo?: string | null;
   assignedWorkerId?: number | null;
   assignedWorkerName?: string | null;
+  assignedWorkerRoleTitle?: string | null;
+  assignmentStartAt?: string | null;
   dueAt?: string | null;
   resolvedAt?: string | null;
   confidenceScore?: number | null;
@@ -178,6 +180,10 @@ export interface Issue {
 export interface IssueDetail extends Issue {
   timeline: TimelineEvent[];
   workerReports?: WorkerReport[];
+  latestWorkerReportStatus?: string | null;
+  workerMarkedResolvedAt?: string | null;
+  canAdminMarkResolved?: boolean;
+  inProgressLockedUntil?: string | null;
 }
 
 export interface MapIssue {
@@ -212,6 +218,7 @@ export interface WorkerProfile {
   id: number;
   name: string;
   email: string;
+  role?: "worker";
   roleTitle?: string | null;
   pointsBalance: number;
   walletBalance: number;
@@ -305,6 +312,7 @@ export const issuesApi = {
       priority?: string;
       assignedTo?: string;
       assignedWorkerId?: number | null;
+      assignmentStartAt?: string | null;
       dueAt?: string | null;
       resolvedImageUrl?: string;
       note?: string;
