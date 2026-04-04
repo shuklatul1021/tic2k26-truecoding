@@ -42,7 +42,6 @@ export default function ProfileScreen() {
 
   async function handleLogout() {
     await logout();
-    router.replace("/auth/welcome");
   }
 
   const { data, isLoading } = useQuery({

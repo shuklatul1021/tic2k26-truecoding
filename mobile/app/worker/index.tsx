@@ -17,7 +17,6 @@ export default function WorkerDashboardScreen() {
 
   async function handleLogout() {
     await logout();
-    router.replace("/auth/welcome");
   }
 
   return (

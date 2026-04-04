@@ -27,6 +27,6 @@ module.exports = ({ config }) => ({
   ],
   extra: {
     ...(config.extra ?? {}),
-    backendUrl: process.env.EXPO_BACKEND_URL || "http://10.191.110.101:3001",
+    backendUrl: process.env.EXPO_BACKEND_URL || "http://10.56.214.200:3001",
   },
 });

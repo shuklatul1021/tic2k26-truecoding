@@ -1,7 +1,7 @@
 import React, { type ReactNode } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 
@@ -14,11 +14,11 @@ interface AdminPageFrameProps {
 
 export function AdminPageFrame({ eyebrow, title, subtitle, children }: AdminPageFrameProps) {
   const { user, logout } = useAuth();
-  const topPadding = Platform.OS === "web" ? 52 : 34;
+  const insets = useSafeAreaInsets();
+  const topPadding = Platform.OS === "web" ? 52 : insets.top + 16;
 
   async function handleLogout() {
     await logout();
-    router.replace("/auth/welcome");
   }
 
   return (

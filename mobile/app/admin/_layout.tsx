@@ -77,7 +77,7 @@ export default function AdminLayout() {
   }
 
   if (!user) {
-    return <Redirect href="/auth/welcome" />;
+    return <Redirect href="/auth/login" />;
   }
 
   if (user.role !== "admin") {

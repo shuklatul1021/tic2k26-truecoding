@@ -33,7 +33,6 @@ export default function WorkerVerifyScreen() {
 
   async function handleLogout() {
     await logout();
-    router.replace("/auth/welcome");
   }
 
   async function detectLocation() {
