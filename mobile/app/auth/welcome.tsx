@@ -1,165 +1,126 @@
-import React from "react";
-import {
-  View, Text, StyleSheet, Pressable, ScrollView, Platform,
-} from "react-native";
+import React, { useMemo, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 
+const slides = [
+  {
+    icon: "globe",
+    title: "Know The Platform",
+    description:
+      "Civic Samadhan helps citizens report issues, lets admins coordinate action, and keeps workers connected to real assignments.",
+    accent: "#E6F5EA",
+  },
+  {
+    icon: "map-pin",
+    title: "Track What Matters",
+    description:
+      "Reports, updates, verification, and issue progress stay in one place so the community can see what is happening clearly.",
+    accent: "#E6F1FF",
+  },
+  {
+    icon: "shield",
+    title: "Move With Roles",
+    description:
+      "Citizens create accounts, admins sign in with pre-provisioned access, and workers receive credentials directly from admins.",
+    accent: "#FFF0E1",
+  },
+];
+
 export default function WelcomeScreen() {
-  const insets = useSafeAreaInsets();
+  const [step, setStep] = useState(0);
+  const isLastStep = step === slides.length - 1;
+  const slide = slides[step];
+  const progress = useMemo(() => slides.map((_, index) => index <= step), [step]);
+
+  function goNext() {
+    if (isLastStep) {
+      router.replace("/auth/login" as never);
+      return;
+    }
+
+    setStep((current) => current + 1);
+  }
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={[
-        styles.scroll,
-        { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 40 },
-      ]}
-      keyboardShouldPersistTaps="handled"
-    >
-      <View style={styles.header}>
-        <View style={styles.logoRing}>
-          <Feather name="eye" size={38} color={Colors.primary} />
-        </View>
-        <Text style={styles.appName}>Civic Samadhan</Text>
-        <Text style={styles.tagline}>Smart Civic Issue Reporting & Resolution</Text>
-      </View>
-
-      <Text style={styles.chooseLabel}>Who are you?</Text>
-
-      <Pressable
-        style={({ pressed }) => [styles.card, styles.citizenCard, pressed && styles.cardPressed]}
-        onPress={() => router.push("/auth/login")}
-      >
-        <View style={[styles.cardIcon, { backgroundColor: Colors.primaryLight }]}>
-          <Feather name="users" size={28} color={Colors.primary} />
-        </View>
-        <View style={styles.cardBody}>
-          <Text style={[styles.cardTitle, { color: Colors.primary }]}>Citizen</Text>
-          <Text style={styles.cardDesc}>
-            Report civic issues, track their progress, and upvote problems in your community
-          </Text>
-        </View>
-        <Feather name="chevron-right" size={20} color={Colors.primary} />
-      </Pressable>
-
-      <View style={styles.cardActions}>
-        <Text style={styles.cardActionText}>New citizen? </Text>
-        <Pressable onPress={() => router.push("/auth/register")}>
-          <Text style={[styles.cardActionLink, { color: Colors.primary }]}>Create account</Text>
+    <View style={styles.container}>
+      <View style={styles.content}>
+        <Pressable style={styles.skipButton} onPress={() => router.replace("/auth/login" as never)}>
+          <Text style={styles.skipText}>Skip</Text>
         </Pressable>
-      </View>
 
-      <View style={styles.divider}>
-        <View style={styles.dividerLine} />
-        <Text style={styles.dividerText}>or</Text>
-        <View style={styles.dividerLine} />
-      </View>
-
-      <Pressable
-        style={({ pressed }) => [styles.card, styles.adminCard, pressed && styles.cardPressed]}
-        onPress={() => router.push("/auth/admin-login")}
-      >
-        <View style={[styles.cardIcon, { backgroundColor: Colors.secondaryLight }]}>
-          <Feather name="shield" size={28} color={Colors.secondary} />
+        <View style={[styles.heroCard, { backgroundColor: slide.accent }]}>
+          <View style={styles.iconShell}>
+            <Feather name={slide.icon as never} size={34} color={Colors.primary} />
+          </View>
+          <Text style={styles.eyebrow}>Welcome To Civic Samadhan</Text>
+          <Text style={styles.title}>{slide.title}</Text>
+          <Text style={styles.description}>{slide.description}</Text>
         </View>
-        <View style={styles.cardBody}>
-          <Text style={[styles.cardTitle, { color: Colors.secondary }]}>Authority / NGO</Text>
-          <Text style={styles.cardDesc}>
-            Government officials and NGOs who manage, assign and resolve civic issues
-          </Text>
+
+        <View style={styles.footer}>
+          <View style={styles.progressRow}>
+            {progress.map((active, index) => (
+              <View key={slides[index].title} style={[styles.progressDot, active && styles.progressDotActive]} />
+            ))}
+          </View>
+
+          <Pressable style={styles.primaryButton} onPress={goNext}>
+            <Text style={styles.primaryButtonText}>{isLastStep ? "Get Started" : "Next"}</Text>
+            <Feather name="arrow-right" size={18} color="#fff" />
+          </Pressable>
         </View>
-        <Feather name="chevron-right" size={20} color={Colors.secondary} />
-      </Pressable>
-
-      <View style={styles.cardActions}>
-        <Text style={styles.cardActionText}>New authority? </Text>
-        <Pressable onPress={() => router.push("/auth/admin-register")}>
-          <Text style={[styles.cardActionLink, { color: Colors.secondary }]}>Register organisation</Text>
-        </Pressable>
       </View>
-
-      <View style={styles.divider}>
-        <View style={styles.dividerLine} />
-        <Text style={styles.dividerText}>or</Text>
-        <View style={styles.dividerLine} />
-      </View>
-
-      <Pressable
-        style={({ pressed }) => [styles.card, styles.workerCard, pressed && styles.cardPressed]}
-        onPress={() => router.push("/auth/worker-login" as never)}
-      >
-        <View style={[styles.cardIcon, { backgroundColor: Colors.warningLight }]}>
-          <Feather name="tool" size={28} color={Colors.warning} />
-        </View>
-        <View style={styles.cardBody}>
-          <Text style={[styles.cardTitle, { color: Colors.warning }]}>Worker</Text>
-          <Text style={styles.cardDesc}>
-            Receive assigned issues, post daily progress, upload proof, and earn completion points
-          </Text>
-        </View>
-        <Feather name="chevron-right" size={20} color={Colors.warning} />
-      </Pressable>
-
-      <View style={styles.footer}>
-        <Feather name="shield" size={14} color={Colors.textTertiary} />
-        <Text style={styles.footerText}>Your data is protected and never shared</Text>
-      </View>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  scroll: { flexGrow: 1, paddingHorizontal: 24 },
-  header: { alignItems: "center", marginBottom: 40 },
-  logoRing: {
-    width: 80, height: 80, borderRadius: 24,
-    backgroundColor: Colors.primaryLight, alignItems: "center",
-    justifyContent: "center", marginBottom: 16,
-    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2, shadowRadius: 12, elevation: 6,
+  container: { flex: 1, backgroundColor: "#F7F9FC" },
+  content: { flex: 1, paddingHorizontal: 24, paddingTop: 28, paddingBottom: 32, justifyContent: "space-between" },
+  skipButton: { alignSelf: "flex-end", paddingHorizontal: 10, paddingVertical: 6 },
+  skipText: { color: Colors.textSecondary, fontSize: 14, fontWeight: "600" as const },
+  heroCard: {
+    flex: 1,
+    marginTop: 18,
+    marginBottom: 28,
+    borderRadius: 32,
+    paddingHorizontal: 28,
+    paddingVertical: 34,
+    justifyContent: "center",
   },
-  appName: { fontSize: 32, fontWeight: "800" as const, color: Colors.text, letterSpacing: -0.5 },
-  tagline: { fontSize: 14, color: Colors.textSecondary, textAlign: "center", marginTop: 8, lineHeight: 20 },
-  chooseLabel: {
-    fontSize: 18, fontWeight: "700" as const, color: Colors.text, marginBottom: 16,
+  iconShell: {
+    width: 76,
+    height: 76,
+    borderRadius: 24,
+    backgroundColor: "#FFFFFFCC",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 26,
   },
-  card: {
-    flexDirection: "row", alignItems: "center", gap: 16,
-    backgroundColor: Colors.surface, borderRadius: 20, padding: 20,
-    borderWidth: 1.5, borderColor: Colors.border,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06, shadowRadius: 12, elevation: 3,
+  eyebrow: {
+    fontSize: 13,
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+    color: Colors.textSecondary,
+    marginBottom: 12,
+    fontWeight: "700" as const,
   },
-  citizenCard: { borderColor: Colors.primaryLight },
-  adminCard: { borderColor: Colors.secondaryLight },
-  workerCard: { borderColor: Colors.warningLight },
-  cardPressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },
-  cardIcon: {
-    width: 56, height: 56, borderRadius: 16,
-    alignItems: "center", justifyContent: "center",
+  title: { fontSize: 34, lineHeight: 40, fontWeight: "800" as const, color: Colors.text, marginBottom: 14 },
+  description: { fontSize: 16, lineHeight: 25, color: Colors.textSecondary },
+  footer: { gap: 18 },
+  progressRow: { flexDirection: "row", justifyContent: "center", gap: 8 },
+  progressDot: { width: 10, height: 10, borderRadius: 999, backgroundColor: Colors.border },
+  progressDotActive: { width: 28, backgroundColor: Colors.primary },
+  primaryButton: {
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: Colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 10,
   },
-  cardBody: { flex: 1 },
-  cardTitle: { fontSize: 18, fontWeight: "700" as const, marginBottom: 4 },
-  cardDesc: { fontSize: 13, color: Colors.textSecondary, lineHeight: 18 },
-  cardActions: {
-    flexDirection: "row", justifyContent: "center", alignItems: "center",
-    marginTop: 10, marginBottom: 4,
-  },
-  cardActionText: { fontSize: 13, color: Colors.textSecondary },
-  cardActionLink: { fontSize: 13, fontWeight: "600" as const },
-  divider: {
-    flexDirection: "row", alignItems: "center", gap: 12,
-    marginVertical: 24,
-  },
-  dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border },
-  dividerText: { color: Colors.textTertiary, fontSize: 13 },
-  footer: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 6, marginTop: 32,
-  },
-  footerText: { fontSize: 12, color: Colors.textTertiary },
+  primaryButtonText: { color: "#fff", fontSize: 16, fontWeight: "700" as const },
 });

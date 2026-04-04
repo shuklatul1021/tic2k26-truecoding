@@ -15,6 +15,11 @@ export default function WorkerDashboardScreen() {
     queryFn: workersApi.getAssignments,
   });
 
+  async function handleLogout() {
+    await logout();
+    router.replace("/auth/welcome");
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       <View style={styles.header}>
@@ -22,7 +27,7 @@ export default function WorkerDashboardScreen() {
           <Text style={styles.heading}>Worker Dashboard</Text>
           <Text style={styles.subheading}>Daily assignments and progress reporting</Text>
         </View>
-        <Pressable style={styles.logoutBtn} onPress={logout}>
+        <Pressable style={styles.logoutBtn} onPress={handleLogout}>
           <Feather name="log-out" size={18} color={Colors.warning} />
         </Pressable>
       </View>

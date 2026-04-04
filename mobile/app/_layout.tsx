@@ -30,14 +30,16 @@ function RootLayoutNav() {
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="auth/welcome" options={{ headerShown: false }} />
+      <Stack.Screen name="auth/portal" options={{ headerShown: false }} />
       <Stack.Screen name="auth/login" options={{ headerShown: false }} />
       <Stack.Screen name="auth/register" options={{ headerShown: false }} />
       <Stack.Screen name="auth/admin-login" options={{ headerShown: false }} />
       <Stack.Screen name="auth/admin-register" options={{ headerShown: false }} />
       <Stack.Screen name="auth/worker-login" options={{ headerShown: false }} />
       <Stack.Screen name="issue/[id]" options={{ title: "Issue Details", headerBackTitle: "Back" }} />
-      <Stack.Screen name="admin/index" options={{ headerShown: false }} />
+      <Stack.Screen name="admin" options={{ headerShown: false }} />
       <Stack.Screen name="worker/index" options={{ headerShown: false }} />
+      <Stack.Screen name="worker/verify" options={{ headerShown: false }} />
       <Stack.Screen name="worker/onboarding" options={{ headerShown: false }} />
       <Stack.Screen name="worker/report/[id]" options={{ headerShown: false }} />
     </Stack>

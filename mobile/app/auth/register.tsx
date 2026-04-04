@@ -30,7 +30,9 @@ export default function RegisterScreen() {
     }
     try {
       setLoading(true);
-      await register(name.trim(), email.trim().toLowerCase(), password);
+      const normalizedName = name.trim();
+      const normalizedEmail = email.trim().toLowerCase();
+      await register(normalizedName, normalizedEmail, password);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace("/(tabs)");
     } catch (err: any) {
@@ -47,16 +49,24 @@ export default function RegisterScreen() {
         contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 20 }]}
         keyboardShouldPersistTaps="handled"
       >
+        <Pressable style={styles.back} onPress={() => router.replace("/auth/login" as never)}>
+          <Feather name="arrow-left" size={20} color={Colors.primary} />
+          <Text style={styles.backText}>Back</Text>
+        </Pressable>
+
         <View style={styles.header}>
           <View style={styles.logo}>
             <Feather name="eye" size={32} color={Colors.primary} />
           </View>
           <Text style={styles.appName}>Civic Samadhan</Text>
-          <Text style={styles.tagline}>Join the community</Text>
+          <Text style={styles.tagline}>Create a citizen account</Text>
         </View>
 
         <View style={styles.form}>
           <Text style={styles.formTitle}>Create account</Text>
+          <Text style={styles.formSubtitle}>
+            This page is for normal users. Admin and worker accounts are created separately and use the shared login page.
+          </Text>
 
           {[
             { label: "Full Name", value: name, setter: setName, icon: "user" as const, placeholder: "John Doe", autoCapitalize: "words" as const },
@@ -117,6 +127,8 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   scroll: { flexGrow: 1, paddingHorizontal: 24 },
+  back: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 16 },
+  backText: { color: Colors.primary, fontSize: 15, fontWeight: "500" as const },
   header: { alignItems: "center", marginBottom: 40 },
   logo: {
     width: 72, height: 72, borderRadius: 20, backgroundColor: Colors.primaryLight,
@@ -130,6 +142,7 @@ const styles = StyleSheet.create({
     elevation: 4, gap: 16,
   },
   formTitle: { fontSize: 22, fontWeight: "700" as const, color: Colors.text, marginBottom: 4 },
+  formSubtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: -8, lineHeight: 20 },
   inputGroup: { gap: 6 },
   label: { fontSize: 14, fontWeight: "500" as const, color: Colors.text },
   inputWrapper: {

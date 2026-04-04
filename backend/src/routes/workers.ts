@@ -15,6 +15,32 @@ function requireWorker(req: AuthenticatedRequest, res: Response, next: () => voi
   next();
 }
 
+async function requireVerifiedWorker(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: () => Promise<void>,
+) {
+  requireWorker(req, res, async () => {
+    const workerProfile = await pool.query(
+      `SELECT is_verified AS "workerVerified"
+       FROM worker_profiles
+       WHERE user_id = $1
+       LIMIT 1`,
+      [req.user!.userId],
+    );
+
+    if (!workerProfile.rows[0]?.workerVerified) {
+      res.status(403).json({
+        error: "Forbidden",
+        message: "Complete worker verification before accessing this area",
+      });
+      return;
+    }
+
+    await next();
+  });
+}
+
 function parseRouteId(value: string | string[] | undefined): number {
   const rawValue = Array.isArray(value) ? value[0] : value;
   return Number.parseInt(rawValue || "", 10);
@@ -63,6 +89,7 @@ router.get("/nearby", requireAuth, async (req: AuthenticatedRequest, res) => {
        FROM users u
        INNER JOIN worker_profiles wp ON wp.user_id = u.id
        WHERE u.role = 'worker'
+         AND wp.is_verified = TRUE
          AND wp.onboarding_completed = TRUE
          AND wp.is_available = TRUE`,
     );
@@ -88,7 +115,7 @@ router.get("/nearby", requireAuth, async (req: AuthenticatedRequest, res) => {
 
 router.post("/me/onboarding", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    requireWorker(req, res, async () => {
+    await requireVerifiedWorker(req, res, async () => {
       const { skills, workLatitude, workLongitude, workAddress } = req.body as {
         skills?: string[];
         workLatitude?: number;
@@ -136,6 +163,7 @@ router.post("/me/onboarding", requireAuth, async (req: AuthenticatedRequest, res
       res.json({
         ...me.rows[0],
         onboardingCompleted: true,
+        workerVerified: true,
       });
     });
   } catch (error) {
@@ -146,7 +174,7 @@ router.post("/me/onboarding", requireAuth, async (req: AuthenticatedRequest, res
 
 router.get("/me/assignments", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    requireWorker(req, res, async () => {
+    await requireVerifiedWorker(req, res, async () => {
       const result = await pool.query(
         `SELECT
            i.id,
@@ -191,7 +219,7 @@ router.get("/me/assignments", requireAuth, async (req: AuthenticatedRequest, res
 
 router.post("/issues/:id/reports", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    requireWorker(req, res, async () => {
+    await requireVerifiedWorker(req, res, async () => {
       const issueId = parseRouteId(req.params.id);
       const { note, status, imageUrl } = req.body as {
         note?: string;

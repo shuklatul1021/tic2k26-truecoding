@@ -130,16 +130,31 @@ CREATE TABLE IF NOT EXISTS timeline_events (
 
 CREATE TABLE IF NOT EXISTS worker_profiles (
   user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  aadhaar_number TEXT NOT NULL UNIQUE,
+  aadhaar_number TEXT UNIQUE,
+  role_title TEXT,
   skills TEXT[] NOT NULL DEFAULT '{}',
   work_latitude DOUBLE PRECISION,
   work_longitude DOUBLE PRECISION,
   work_address TEXT,
+  is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  verified_at TIMESTAMPTZ,
+  invited_by_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE,
   is_available BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS invited_by_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE worker_profiles ADD COLUMN IF NOT EXISTS role_title TEXT;
+ALTER TABLE worker_profiles ALTER COLUMN aadhaar_number DROP NOT NULL;
+UPDATE worker_profiles
+SET is_verified = TRUE,
+    verified_at = COALESCE(verified_at, NOW())
+WHERE onboarding_completed = TRUE
+  AND is_verified = FALSE;
 
 CREATE TABLE IF NOT EXISTS worker_reports (
   id SERIAL PRIMARY KEY,

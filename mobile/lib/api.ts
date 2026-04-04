@@ -79,6 +79,7 @@ export interface User {
   pointsBalance?: number;
   walletBalance?: number;
   onboardingCompleted?: boolean;
+  workerVerified?: boolean;
 }
 
 export interface TimelineEvent {
@@ -211,6 +212,7 @@ export interface WorkerProfile {
   id: number;
   name: string;
   email: string;
+  roleTitle?: string | null;
   pointsBalance: number;
   walletBalance: number;
   skills: string[];
@@ -222,15 +224,37 @@ export interface WorkerProfile {
   distanceKm?: number;
 }
 
+export interface WorkerAccount {
+  id: number;
+  name: string;
+  email: string;
+  createdAt: string;
+  onboardingCompleted: boolean;
+  workerVerified: boolean;
+  verifiedAt?: string | null;
+  roleTitle?: string | null;
+  skills?: string[];
+  invitedByAdminId?: number | null;
+  invitedByAdminName?: string | null;
+}
+
 export const authApi = {
   register: (data: { name: string; email: string; password: string }) =>
     api.post<{ token: string; user: User }>("/auth/register", data),
   registerAdmin: (data: { name: string; email: string; password: string }) =>
     api.post<{ token: string; user: User }>("/auth/register-admin", data),
-  workerRegister: (data: { name: string; email: string; aadhaarNumber: string }) =>
-    api.post<{ token: string; user: User }>("/auth/worker-register", data),
-  workerLogin: (data: { email: string; aadhaarNumber: string }) =>
+  workerLogin: (data: { email: string; password: string }) =>
     api.post<{ token: string; user: User }>("/auth/worker-login", data),
+  verifyWorker: (data: {
+    name: string;
+    password: string;
+    roleTitle: string;
+    skills: string[];
+    workLatitude?: number;
+    workLongitude?: number;
+    workAddress?: string;
+  }) =>
+    api.post<{ user: User }>("/auth/worker-verify", data),
   login: (data: { email: string; password: string }) =>
     api.post<{ token: string; user: User }>("/auth/login", data),
   me: () => api.get<User>("/auth/me"),
@@ -294,6 +318,12 @@ export const issuesApi = {
 
 export const adminApi = {
   getStats: () => api.get<AdminStats>("/admin/stats"),
+  getWorkers: () => api.get<WorkerAccount[]>("/admin/workers"),
+  createWorker: (data: {
+    name: string;
+    email: string;
+    password: string;
+  }) => api.post<WorkerAccount>("/admin/workers", data),
 };
 
 export const workersApi = {

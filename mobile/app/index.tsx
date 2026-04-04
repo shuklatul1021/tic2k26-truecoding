@@ -4,6 +4,7 @@ import { router } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
+import { getPostAuthRoute } from "@/lib/auth-routing";
 
 export default function IntroScreen() {
   const { user, isLoading } = useAuth();
@@ -18,18 +19,7 @@ export default function IntroScreen() {
         router.replace("/auth/welcome");
         return;
       }
-
-      if (user.role === "admin") {
-        router.replace("/admin");
-        return;
-      }
-
-      if (user.role === "worker") {
-        router.replace((user.onboardingCompleted ? "/worker" : "/worker/onboarding") as never);
-        return;
-      }
-
-      router.replace("/(tabs)");
+      router.replace(getPostAuthRoute(user) as never);
     }, 900);
 
     return () => clearTimeout(timeout);

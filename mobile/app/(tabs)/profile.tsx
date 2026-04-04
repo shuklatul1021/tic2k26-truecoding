@@ -40,6 +40,11 @@ export default function ProfileScreen() {
   const bottomPadding = Platform.OS === "web" ? 34 : 0;
   const wideLayout = width >= 840;
 
+  async function handleLogout() {
+    await logout();
+    router.replace("/auth/welcome");
+  }
+
   const { data, isLoading } = useQuery({
     queryKey: ["user-issues", user?.id],
     queryFn: () => (user ? issuesApi.getUserIssues(user.id) : Promise.reject()),
@@ -225,7 +230,7 @@ export default function ProfileScreen() {
         style={styles.logoutBtn}
         onPress={() => Alert.alert("Logout", "Are you sure?", [
           { text: "Cancel", style: "cancel" },
-          { text: "Logout", style: "destructive", onPress: logout },
+          { text: "Logout", style: "destructive", onPress: () => { void handleLogout(); } },
         ])}
       >
         <Feather name="log-out" size={18} color={Colors.danger} />
