@@ -38,10 +38,7 @@ function RootLayoutNav() {
       <Stack.Screen name="auth/worker-login" options={{ headerShown: false }} />
       <Stack.Screen name="issue/[id]" options={{ title: "Issue Details", headerBackTitle: "Back" }} />
       <Stack.Screen name="admin" options={{ headerShown: false }} />
-      <Stack.Screen name="worker/index" options={{ headerShown: false }} />
-      <Stack.Screen name="worker/verify" options={{ headerShown: false }} />
-      <Stack.Screen name="worker/onboarding" options={{ headerShown: false }} />
-      <Stack.Screen name="worker/report/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="worker" options={{ headerShown: false }} />
     </Stack>
   );
 }

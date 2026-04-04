@@ -192,6 +192,9 @@ router.get("/me/assignments", requireAuth, async (req: AuthenticatedRequest, res
            i.longitude,
            i.address,
            i.assigned_to AS "assignedTo",
+           i.assignment_start_at AS "assignmentStartAt",
+           i.assignment_response_status AS "assignmentResponseStatus",
+           i.assignment_responded_at AS "assignmentRespondedAt",
            i.verification_status AS "verificationStatus",
            i.verification_summary AS "verificationSummary",
            i.location_verified AS "locationVerified",
@@ -241,12 +244,23 @@ router.post("/issues/:id/reports", requireAuth, async (req: AuthenticatedRequest
       }
 
       const assignment = await pool.query(
-        `SELECT id FROM issues WHERE id = $1 AND assigned_worker_id = $2 LIMIT 1`,
+        `SELECT assignment_response_status AS "assignmentResponseStatus"
+         FROM issues
+         WHERE id = $1 AND assigned_worker_id = $2
+         LIMIT 1`,
         [issueId, req.user!.userId],
       );
 
       if (!assignment.rowCount) {
         res.status(404).json({ error: "NotFound", message: "Assigned issue not found" });
+        return;
+      }
+
+      if (assignment.rows[0]?.assignmentResponseStatus !== "accepted") {
+        res.status(409).json({
+          error: "Conflict",
+          message: "Accept this assignment before sending progress updates.",
+        });
         return;
       }
 
@@ -301,6 +315,97 @@ router.post("/issues/:id/reports", requireAuth, async (req: AuthenticatedRequest
   } catch (error) {
     logger.error({ error }, "Worker report error");
     res.status(500).json({ error: "InternalError", message: "Failed to create worker report" });
+  }
+});
+
+router.post("/issues/:id/assignment-response", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    await requireVerifiedWorker(req, res, async () => {
+      const issueId = parseRouteId(req.params.id);
+      const { decision } = req.body as { decision?: "accepted" | "rejected" };
+
+      if (!Number.isFinite(issueId) || !decision || !["accepted", "rejected"].includes(decision)) {
+        res.status(400).json({ error: "BadRequest", message: "Valid issue id and decision are required" });
+        return;
+      }
+
+      const assignmentResult = await pool.query(
+        `SELECT
+           id,
+           status,
+           assignment_response_status AS "assignmentResponseStatus"
+         FROM issues
+         WHERE id = $1 AND assigned_worker_id = $2
+         LIMIT 1`,
+        [issueId, req.user!.userId],
+      );
+
+      const assignment = assignmentResult.rows[0] as
+        | {
+            id: number;
+            status: string;
+            assignmentResponseStatus: string;
+          }
+        | undefined;
+
+      if (!assignment) {
+        res.status(404).json({ error: "NotFound", message: "Assigned issue not found" });
+        return;
+      }
+
+      if (assignment.assignmentResponseStatus === decision) {
+        res.json({ success: true, decision });
+        return;
+      }
+
+      if (decision === "accepted") {
+        await pool.query(
+          `UPDATE issues
+           SET assignment_response_status = 'accepted',
+               assignment_responded_at = NOW(),
+               status = CASE WHEN status = 'pending' THEN 'in_progress' ELSE status END,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [issueId],
+        );
+
+        await pool.query(
+          `INSERT INTO timeline_events (issue_id, status, note, created_by)
+           VALUES ($1, $2, $3, $4)`,
+          [
+            issueId,
+            assignment.status === "pending" ? "in_progress" : assignment.status,
+            "Worker accepted the assignment",
+            req.user!.email,
+          ],
+        );
+      } else {
+        await pool.query(
+          `UPDATE issues
+           SET assigned_to = NULL,
+               assigned_worker_id = NULL,
+               assignment_start_at = NULL,
+               assignment_response_status = 'pending',
+               assignment_responded_at = NOW(),
+               due_at = NULL,
+               status = CASE WHEN status = 'in_progress' THEN 'pending' ELSE status END,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [issueId],
+        );
+
+        await pool.query(
+          `INSERT INTO timeline_events (issue_id, status, note, created_by)
+           VALUES ($1, 'pending', $2, $3)`,
+          [issueId, "Worker rejected the assignment and it returned to the queue", req.user!.email],
+        );
+      }
+
+      res.json({ success: true, decision });
+    });
+  } catch (error) {
+    logger.error({ error }, "Worker assignment response error");
+    res.status(500).json({ error: "InternalError", message: "Failed to update assignment response" });
   }
 });
 

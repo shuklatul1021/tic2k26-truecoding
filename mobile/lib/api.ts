@@ -152,6 +152,8 @@ export interface Issue {
   assignedWorkerName?: string | null;
   assignedWorkerRoleTitle?: string | null;
   assignmentStartAt?: string | null;
+  assignmentResponseStatus?: "pending" | "accepted" | "rejected";
+  assignmentRespondedAt?: string | null;
   dueAt?: string | null;
   resolvedAt?: string | null;
   confidenceScore?: number | null;
@@ -346,6 +348,11 @@ export const workersApi = {
     workAddress?: string;
   }) => api.post<User>("/workers/me/onboarding", data),
   getAssignments: () => api.get<Issue[]>("/workers/me/assignments"),
+  respondToAssignment: (issueId: number, decision: "accepted" | "rejected") =>
+    api.post<{ success: boolean; decision: "accepted" | "rejected" }>(
+      `/workers/issues/${issueId}/assignment-response`,
+      { decision },
+    ),
   submitReport: (
     issueId: number,
     data: { note: string; status: string; imageUrl?: string | null },

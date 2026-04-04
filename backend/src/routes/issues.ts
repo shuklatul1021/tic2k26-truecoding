@@ -52,6 +52,8 @@ async function loadIssueDetail(issueId: number, currentUserId?: number | null) {
        i.assigned_to AS "assignedTo",
        i.assigned_worker_id AS "assignedWorkerId",
        i.assignment_start_at AS "assignmentStartAt",
+       i.assignment_response_status AS "assignmentResponseStatus",
+       i.assignment_responded_at AS "assignmentRespondedAt",
        i.due_at AS "dueAt",
        i.resolved_at AS "resolvedAt",
        i.verification_status AS "verificationStatus",
@@ -314,6 +316,8 @@ router.get("/", async (req: AuthenticatedRequest, res) => {
          i.assigned_to AS "assignedTo",
          i.assigned_worker_id AS "assignedWorkerId",
          worker.name AS "assignedWorkerName",
+         i.assignment_response_status AS "assignmentResponseStatus",
+         i.assignment_responded_at AS "assignmentRespondedAt",
          i.due_at AS "dueAt",
          i.verification_status AS "verificationStatus",
          i.verification_summary AS "verificationSummary",
@@ -627,6 +631,7 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
          user_id AS "userId",
          assigned_worker_id AS "assignedWorkerId",
          assignment_start_at AS "assignmentStartAt",
+         assignment_response_status AS "assignmentResponseStatus",
          due_at AS "dueAt"
        FROM issues
        WHERE id = $1
@@ -641,6 +646,7 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
           userId: number;
           assignedWorkerId: number | null;
           assignmentStartAt: string | null;
+          assignmentResponseStatus: string;
           dueAt: string | null;
         }
       | undefined;
@@ -775,6 +781,17 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
     if (assignedWorkerId !== undefined) {
       values.push(assignedWorkerId ?? null);
       updates.push(`assigned_worker_id = $${values.length}`);
+    }
+    if (assignedWorkerId !== undefined) {
+      if (assignedWorkerId !== null && currentIssue.assignedWorkerId !== assignedWorkerId) {
+        values.push("pending");
+        updates.push(`assignment_response_status = $${values.length}`);
+        updates.push("assignment_responded_at = NULL");
+      } else if (assignedWorkerId === null) {
+        values.push("pending");
+        updates.push(`assignment_response_status = $${values.length}`);
+        updates.push("assignment_responded_at = NULL");
+      }
     }
     if (assignmentStartAt !== undefined) {
       values.push(assignmentStartAt || null);
