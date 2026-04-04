@@ -14,7 +14,7 @@ router.get("/stats", requireAdmin, async (_req, res) => {
          COUNT(*)::int AS total,
          COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
          COUNT(*) FILTER (WHERE status = 'in_progress')::int AS in_progress,
-         COUNT(*) FILTER (WHERE status = 'resolved')::int AS resolved,
+         COUNT(*) FILTER (WHERE status IN ('resolved', 'closed'))::int AS resolved,
          COUNT(*) FILTER (WHERE priority = 'high')::int AS high
        FROM issues`,
     );

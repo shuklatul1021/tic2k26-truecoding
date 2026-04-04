@@ -29,7 +29,13 @@ EXCEPTION
 END $$;
 
 DO $$ BEGIN
-  CREATE TYPE issue_status AS ENUM ('pending', 'in_progress', 'resolved');
+  CREATE TYPE issue_status AS ENUM ('pending', 'in_progress', 'resolved', 'closed');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  ALTER TYPE issue_status ADD VALUE IF NOT EXISTS 'closed';
 EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
@@ -65,7 +71,10 @@ CREATE TABLE IF NOT EXISTS issues (
   assigned_worker_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   assignment_start_at TIMESTAMPTZ,
   due_at TIMESTAMPTZ,
+  resolution_verified_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  resolution_verified_by_user_at TIMESTAMPTZ,
   resolved_at TIMESTAMPTZ,
+  closed_at TIMESTAMPTZ,
   verification_status TEXT NOT NULL DEFAULT 'verified',
   verification_summary TEXT,
   authenticity_score DOUBLE PRECISION,
@@ -95,7 +104,10 @@ ALTER TABLE issues ADD COLUMN IF NOT EXISTS assignment_start_at TIMESTAMPTZ;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS assignment_response_status TEXT NOT NULL DEFAULT 'pending';
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS assignment_responded_at TIMESTAMPTZ;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ;
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS resolution_verified_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS resolution_verified_by_user_at TIMESTAMPTZ;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'verified';
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS verification_summary TEXT;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS authenticity_score DOUBLE PRECISION;

@@ -54,7 +54,10 @@ async function loadIssueDetail(issueId: number, currentUserId?: number | null) {
        i.assignment_response_status AS "assignmentResponseStatus",
        i.assignment_responded_at AS "assignmentRespondedAt",
        i.due_at AS "dueAt",
+       i.resolution_verified_by_user_id AS "resolutionVerifiedByUserId",
+       i.resolution_verified_by_user_at AS "resolutionVerifiedByUserAt",
        i.resolved_at AS "resolvedAt",
+       i.closed_at AS "closedAt",
        i.verification_status AS "verificationStatus",
        i.verification_summary AS "verificationSummary",
        i.authenticity_score AS "authenticityScore",
@@ -169,15 +172,29 @@ async function loadIssueDetail(issueId: number, currentUserId?: number | null) {
     ? addDays(latestAdminInProgressAt, ADMIN_IN_PROGRESS_LOCK_DAYS)
     : null;
   const latestWorkerReport = latestAssignedWorkerReportResult.rows[0];
-  const workerMarkedResolved = latestWorkerReport?.status === "resolved";
+  const workerMarkedCompleted = latestWorkerReport?.status === "completed";
 
   return {
     ...issue,
     timeline: timelineResult.rows,
     workerReports: reportsResult.rows,
     latestWorkerReportStatus: latestWorkerReport?.status ?? null,
-    workerMarkedResolvedAt: workerMarkedResolved ? latestWorkerReport.createdAt : null,
-    canAdminMarkResolved: Boolean(issue.assignedWorkerId && workerMarkedResolved),
+    workerMarkedCompletedAt: workerMarkedCompleted ? latestWorkerReport.createdAt : null,
+    reporterVerifiedResolution: Boolean(issue.resolutionVerifiedByUserAt),
+    canReporterVerifyResolution: Boolean(
+      currentUserId &&
+      issue.userId === currentUserId &&
+      issue.assignedWorkerId &&
+      workerMarkedCompleted &&
+      !issue.resolutionVerifiedByUserAt &&
+      !["resolved", "closed"].includes(issue.status),
+    ),
+    canAdminCloseIssue: Boolean(
+      issue.assignedWorkerId &&
+      workerMarkedCompleted &&
+      issue.resolutionVerifiedByUserAt &&
+      !["resolved", "closed"].includes(issue.status),
+    ),
     inProgressLockedUntil: inProgressLockedUntil?.toISOString() ?? null,
   };
 }
@@ -318,6 +335,7 @@ router.get("/", async (req: AuthenticatedRequest, res) => {
          i.assignment_response_status AS "assignmentResponseStatus",
          i.assignment_responded_at AS "assignmentRespondedAt",
          i.due_at AS "dueAt",
+         i.resolution_verified_by_user_at AS "resolutionVerifiedByUserAt",
          i.verification_status AS "verificationStatus",
          i.verification_summary AS "verificationSummary",
          i.authenticity_score AS "authenticityScore",
@@ -333,6 +351,7 @@ router.get("/", async (req: AuthenticatedRequest, res) => {
          i.reward_points AS "rewardPoints",
          i.worker_points AS "workerPoints",
          i.worker_bonus_points AS "workerBonusPoints",
+         i.closed_at AS "closedAt",
          i.confidence_score AS "confidenceScore",
          ${distanceSql ? `${distanceSql} AS "distanceKm",` : `NULL::double precision AS "distanceKm",`}
          i.user_id AS "userId",
@@ -568,6 +587,102 @@ router.get("/:id", async (req: AuthenticatedRequest, res) => {
   }
 });
 
+router.post("/:id/verify-resolution", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const issueId = parseRouteId(req.params.id);
+    if (!Number.isFinite(issueId)) {
+      res.status(400).json({ error: "BadRequest", message: "Invalid issue id" });
+      return;
+    }
+
+    const issueResult = await pool.query(
+      `SELECT
+         user_id AS "userId",
+         assigned_worker_id AS "assignedWorkerId",
+         resolution_verified_by_user_at AS "resolutionVerifiedByUserAt",
+         status
+       FROM issues
+       WHERE id = $1
+       LIMIT 1`,
+      [issueId],
+    );
+
+    const issue = issueResult.rows[0] as
+      | {
+          userId: number;
+          assignedWorkerId: number | null;
+          resolutionVerifiedByUserAt: string | null;
+          status: string;
+        }
+      | undefined;
+
+    if (!issue) {
+      res.status(404).json({ error: "NotFound", message: "Issue not found" });
+      return;
+    }
+
+    if (req.user!.userId !== issue.userId) {
+      res.status(403).json({ error: "Forbidden", message: "Only the complaint reporter can verify completion" });
+      return;
+    }
+
+    if (["resolved", "closed"].includes(issue.status)) {
+      res.status(409).json({ error: "Conflict", message: "This issue is already closed" });
+      return;
+    }
+
+    if (!issue.assignedWorkerId) {
+      res.status(409).json({ error: "Conflict", message: "No worker is assigned to this issue" });
+      return;
+    }
+
+    if (issue.resolutionVerifiedByUserAt) {
+      const detail = await loadIssueDetail(issueId, req.user!.userId);
+      res.json(detail);
+      return;
+    }
+
+    const latestWorkerReportResult = await pool.query(
+      `SELECT status
+       FROM worker_reports
+       WHERE issue_id = $1
+         AND worker_id = $2
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [issueId, issue.assignedWorkerId],
+    );
+
+    if (latestWorkerReportResult.rows[0]?.status !== "completed") {
+      res.status(409).json({
+        error: "Conflict",
+        message: "You can verify completion only after the assigned worker marks the task completed.",
+      });
+      return;
+    }
+
+    await pool.query(
+      `UPDATE issues
+       SET resolution_verified_by_user_id = $2,
+           resolution_verified_by_user_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [issueId, req.user!.userId],
+    );
+
+    await pool.query(
+      `INSERT INTO timeline_events (issue_id, status, note, created_by)
+       VALUES ($1, $2, $3, $4)`,
+      [issueId, issue.status, "Reporter verified the completed work", req.user!.email],
+    );
+
+    const detail = await loadIssueDetail(issueId, req.user!.userId);
+    res.json(detail);
+  } catch (error) {
+    logger.error({ error }, "Verify resolution error");
+    res.status(500).json({ error: "InternalError", message: "Failed to verify completed work" });
+  }
+});
+
 router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
   try {
     const issueId = parseRouteId(req.params.id);
@@ -624,6 +739,8 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
          assigned_worker_id AS "assignedWorkerId",
          assignment_start_at AS "assignmentStartAt",
          assignment_response_status AS "assignmentResponseStatus",
+         resolution_verified_by_user_at AS "resolutionVerifiedByUserAt",
+         closed_at AS "closedAt",
          due_at AS "dueAt"
        FROM issues
        WHERE id = $1
@@ -639,12 +756,19 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
           assignedWorkerId: number | null;
           assignmentStartAt: string | null;
           assignmentResponseStatus: string;
+          resolutionVerifiedByUserAt: string | null;
+          closedAt: string | null;
           dueAt: string | null;
         }
       | undefined;
 
     if (!currentIssue) {
       res.status(404).json({ error: "NotFound", message: "Issue not found" });
+      return;
+    }
+
+    if (currentIssue.status === "closed") {
+      res.status(409).json({ error: "Conflict", message: "Closed issues are read-only." });
       return;
     }
 
@@ -715,9 +839,9 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
       }
     }
 
-    if (status === "resolved") {
-      if (currentIssue.status === "resolved") {
-        res.status(409).json({ error: "Conflict", message: "Issue is already resolved." });
+    if (status === "resolved" || status === "closed") {
+      if (currentIssue.status === "resolved" || currentIssue.status === "closed") {
+        res.status(409).json({ error: "Conflict", message: "Issue is already closed." });
         return;
       }
 
@@ -739,10 +863,18 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
         [issueId, nextAssignedWorkerId],
       );
 
-      if (latestWorkerReportResult.rows[0]?.status !== "resolved") {
+      if (latestWorkerReportResult.rows[0]?.status !== "completed") {
         res.status(409).json({
           error: "Conflict",
-          message: "Admin can mark this issue resolved only after the assigned worker submits a resolved update.",
+          message: "Admin can close this issue only after the assigned worker submits a completed update.",
+        });
+        return;
+      }
+
+      if (!currentIssue.resolutionVerifiedByUserAt) {
+        res.status(409).json({
+          error: "Conflict",
+          message: "Admin can close this issue only after the complaint reporter verifies the completed work.",
         });
         return;
       }
@@ -752,10 +884,11 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
     const values: Array<string | number | null> = [];
 
     if (status) {
-      values.push(status);
+      values.push(status === "resolved" ? "closed" : status);
       updates.push(`status = $${values.length}`);
-      if (status === "resolved") {
+      if (status === "resolved" || status === "closed") {
         updates.push("resolved_at = NOW()");
+        updates.push("closed_at = NOW()");
       }
     }
     if (priority) {
@@ -836,18 +969,18 @@ router.patch("/:id", requireAdmin, async (req: AuthenticatedRequest, res) => {
           ? currentIssue.status === "in_progress"
             ? "Admin refreshed in-progress status"
             : "Admin marked issue in progress"
-          : status === "resolved"
-            ? "Admin confirmed issue resolved after worker completion"
+          : status === "resolved" || status === "closed"
+            ? "Admin closed issue after reporter verification"
             : `Status updated to ${status}`;
 
       await pool.query(
         `INSERT INTO timeline_events (issue_id, status, note, created_by)
          VALUES ($1, $2, $3, $4)`,
-        [issueId, status, note?.trim() || defaultStatusNote, req.user!.email],
+        [issueId, status === "resolved" ? "closed" : status, note?.trim() || defaultStatusNote, req.user!.email],
       );
     }
 
-    if (status === "resolved" && currentIssue.status !== "resolved") {
+    if ((status === "resolved" || status === "closed") && currentIssue.status !== "closed") {
       await awardResolutionRewards({
         issueId,
         reporterUserId: currentIssue.userId,

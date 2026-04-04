@@ -5,7 +5,7 @@ export type VerificationStatus = "pending" | "verified" | "rejected";
 export type ImageSource = "camera" | "gallery";
 export type IssueCategory = "garbage" | "pothole" | "water_leakage" | "other";
 export type IssuePriority = "high" | "medium" | "low";
-export type IssueStatus = "pending" | "in_progress" | "resolved";
+export type IssueStatus = "pending" | "in_progress" | "resolved" | "closed";
 
 export const ISSUE_CATEGORIES: IssueCategory[] = [
   "garbage",
@@ -15,7 +15,7 @@ export const ISSUE_CATEGORIES: IssueCategory[] = [
 ];
 
 export const ISSUE_PRIORITIES: IssuePriority[] = ["high", "medium", "low"];
-export const ISSUE_STATUSES: IssueStatus[] = ["pending", "in_progress", "resolved"];
+export const ISSUE_STATUSES: IssueStatus[] = ["pending", "in_progress", "resolved", "closed"];
 
 export function isIssueCategory(value: string): value is IssueCategory {
   return ISSUE_CATEGORIES.includes(value as IssueCategory);
@@ -33,7 +33,7 @@ export async function getUserStats(userId: number) {
   const { rows } = await pool.query(
     `SELECT
        COUNT(*)::int AS "issuesReported",
-       COUNT(*) FILTER (WHERE status = 'resolved')::int AS "issuesResolved"
+       COUNT(*) FILTER (WHERE status IN ('resolved', 'closed'))::int AS "issuesResolved"
      FROM issues
      WHERE user_id = $1`,
     [userId],

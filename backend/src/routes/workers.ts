@@ -1,10 +1,8 @@
 import { Router, type Response } from "express";
 import { pool } from "../db/pool.js";
-import { isIssueStatus } from "../db/queries.js";
 import { requireAuth } from "../middleware/auth.js";
 import type { AuthenticatedRequest } from "../types/auth.js";
 import { logger } from "../lib/logger.js";
-import { verifyWorkerReportImage } from "../services/verification.js";
 
 const router = Router();
 
@@ -195,6 +193,7 @@ router.get("/me/assignments", requireAuth, async (req: AuthenticatedRequest, res
            i.assignment_start_at AS "assignmentStartAt",
            i.assignment_response_status AS "assignmentResponseStatus",
            i.assignment_responded_at AS "assignmentRespondedAt",
+           i.resolution_verified_by_user_at AS "resolutionVerifiedByUserAt",
            i.verification_status AS "verificationStatus",
            i.verification_summary AS "verificationSummary",
            i.location_verified AS "locationVerified",
@@ -238,13 +237,15 @@ router.post("/issues/:id/reports", requireAuth, async (req: AuthenticatedRequest
         return;
       }
 
-      if (!isIssueStatus(status.trim()) || !["in_progress", "resolved"].includes(status.trim())) {
-        res.status(400).json({ error: "BadRequest", message: "Workers can only submit in progress or resolved updates" });
+      if (!["in_progress", "completed"].includes(status.trim())) {
+        res.status(400).json({ error: "BadRequest", message: "Workers can only submit in progress or completed updates" });
         return;
       }
 
       const assignment = await pool.query(
-        `SELECT assignment_response_status AS "assignmentResponseStatus"
+        `SELECT
+           assignment_response_status AS "assignmentResponseStatus",
+           status
          FROM issues
          WHERE id = $1 AND assigned_worker_id = $2
          LIMIT 1`,
@@ -264,7 +265,13 @@ router.post("/issues/:id/reports", requireAuth, async (req: AuthenticatedRequest
         return;
       }
 
-      const verification = await verifyWorkerReportImage(imageUrl || null);
+      if (["resolved", "closed"].includes(assignment.rows[0]?.status)) {
+        res.status(409).json({
+          error: "Conflict",
+          message: "This issue is already closed for updates.",
+        });
+        return;
+      }
 
       const result = await pool.query(
         `INSERT INTO worker_reports (
@@ -292,8 +299,8 @@ router.post("/issues/:id/reports", requireAuth, async (req: AuthenticatedRequest
           note.trim(),
           status.trim(),
           imageUrl?.trim() || null,
-          verification.status,
-          verification.summary,
+          imageUrl?.trim() ? "uploaded" : "not_provided",
+          imageUrl?.trim() ? "Worker uploaded progress image" : "No progress image provided",
         ],
       );
 
@@ -302,9 +309,9 @@ router.post("/issues/:id/reports", requireAuth, async (req: AuthenticatedRequest
          VALUES ($1, $2, $3, $4)`,
         [
           issueId,
-          "in_progress",
-          status.trim() === "resolved"
-            ? `Worker marked task resolved: ${note.trim()}`
+          status.trim() === "completed" ? "completed" : "in_progress",
+          status.trim() === "completed"
+            ? `Worker marked task completed: ${note.trim()}`
             : `Worker update: ${note.trim()}`,
           req.user!.email,
         ],
